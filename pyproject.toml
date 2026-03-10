@@ -1,0 +1,71 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "batchllm"
+version = "0.1.0"
+description = "Batch processing for LLM APIs - CSV/JSONL in, processed out. With retries, rate limiting, and cost tracking."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.9"
+authors = [{ name = "Yufeng He", email = "40085740+he-yufeng@users.noreply.github.com" }]
+keywords = [
+    "llm",
+    "batch",
+    "openai",
+    "anthropic",
+    "gpt",
+    "claude",
+    "bulk",
+    "data-processing",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "openai>=1.0",
+    "click>=8.0",
+    "rich>=13.0",
+    "tiktoken>=0.5",
+    "pyyaml>=6.0",
+    "aiofiles>=23.0",
+]
+
+[project.optional-dependencies]
+anthropic = ["anthropic>=0.25"]
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.23",
+    "pytest-cov>=4.0",
+    "ruff>=0.4",
+]
+
+[project.scripts]
+batchllm = "batchllm.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/he-yufeng/BatchLLM"
+Repository = "https://github.com/he-yufeng/BatchLLM"
+Issues = "https://github.com/he-yufeng/BatchLLM/issues"
+
+[tool.ruff]
+target-version = "py39"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"

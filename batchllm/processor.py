@@ -1,0 +1,384 @@
+"""Core batch processing engine."""
+
+from __future__ import annotations
+
+import asyncio
+import csv
+import json
+import logging
+import time
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Callable
+
+from openai import AsyncOpenAI
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class BatchConfig:
+    """Configuration for a batch processing job."""
+
+    model: str = "gpt-4o-mini"
+    system_prompt: str | None = None
+    prompt_template: str = "{input}"
+    max_concurrent: int = 10
+    max_retries: int = 3
+    retry_base_delay: float = 1.0
+    retry_max_delay: float = 60.0
+    timeout: float = 120.0
+    max_tokens: int | None = None
+    temperature: float | None = None
+    api_key: str | None = None
+    base_url: str | None = None
+    checkpoint_every: int = 50
+    input_column: str = "input"
+    output_column: str = "output"
+
+
+@dataclass
+class BatchResult:
+    """Result of processing a single item."""
+
+    index: int
+    input_text: str
+    output_text: str | None = None
+    error: str | None = None
+    tokens_in: int = 0
+    tokens_out: int = 0
+    latency_ms: float = 0.0
+
+
+@dataclass
+class BatchStats:
+    """Aggregate stats for a batch job."""
+
+    total: int = 0
+    completed: int = 0
+    failed: int = 0
+    total_tokens_in: int = 0
+    total_tokens_out: int = 0
+    total_latency_ms: float = 0.0
+    start_time: float = 0.0
+    end_time: float = 0.0
+
+    @property
+    def success_rate(self) -> float:
+        return self.completed / max(self.total, 1)
+
+    @property
+    def avg_latency_ms(self) -> float:
+        done = self.completed + self.failed
+        return self.total_latency_ms / max(done, 1)
+
+    @property
+    def elapsed_seconds(self) -> float:
+        end = self.end_time or time.time()
+        return end - self.start_time if self.start_time else 0.0
+
+    @property
+    def items_per_second(self) -> float:
+        elapsed = self.elapsed_seconds
+        return (self.completed + self.failed) / max(elapsed, 0.001)
+
+
+class BatchProcessor:
+    """Process a batch of inputs through an LLM API.
+
+    Handles concurrent requests, retries with exponential backoff,
+    rate limiting, checkpointing, and cost tracking.
+    """
+
+    def __init__(self, config: BatchConfig | None = None):
+        self.config = config or BatchConfig()
+        self._client: AsyncOpenAI | None = None
+        self._semaphore: asyncio.Semaphore | None = None
+        self.stats = BatchStats()
+        self._results: list[BatchResult] = []
+        self._checkpoint_path: Path | None = None
+        self._completed_indices: set[int] = set()
+
+    def _get_client(self) -> AsyncOpenAI:
+        if self._client is None:
+            kwargs: dict[str, Any] = {}
+            if self.config.api_key:
+                kwargs["api_key"] = self.config.api_key
+            if self.config.base_url:
+                kwargs["base_url"] = self.config.base_url
+            kwargs["timeout"] = self.config.timeout
+            self._client = AsyncOpenAI(**kwargs)
+        return self._client
+
+    def _build_messages(self, input_text: str) -> list[dict[str, str]]:
+        messages: list[dict[str, str]] = []
+        if self.config.system_prompt:
+            messages.append({"role": "system", "content": self.config.system_prompt})
+        prompt = self.config.prompt_template.replace("{input}", input_text)
+        messages.append({"role": "user", "content": prompt})
+        return messages
+
+    async def _process_one(self, index: int, input_text: str) -> BatchResult:
+        """Process a single item with retries."""
+        assert self._semaphore is not None
+        async with self._semaphore:
+            result = BatchResult(index=index, input_text=input_text)
+            messages = self._build_messages(input_text)
+
+            for attempt in range(self.config.max_retries + 1):
+                try:
+                    start = time.monotonic()
+                    client = self._get_client()
+
+                    kwargs: dict[str, Any] = {
+                        "model": self.config.model,
+                        "messages": messages,
+                    }
+                    if self.config.max_tokens is not None:
+                        kwargs["max_tokens"] = self.config.max_tokens
+                    if self.config.temperature is not None:
+                        kwargs["temperature"] = self.config.temperature
+
+                    response = await client.chat.completions.create(**kwargs)
+
+                    elapsed = (time.monotonic() - start) * 1000
+                    result.latency_ms = elapsed
+
+                    choice = response.choices[0] if response.choices else None
+                    result.output_text = choice.message.content if choice else None
+
+                    usage = response.usage
+                    if usage:
+                        result.tokens_in = usage.prompt_tokens
+                        result.tokens_out = usage.completion_tokens
+
+                    self.stats.completed += 1
+                    self.stats.total_tokens_in += result.tokens_in
+                    self.stats.total_tokens_out += result.tokens_out
+                    self.stats.total_latency_ms += result.latency_ms
+                    return result
+
+                except Exception as exc:
+                    if attempt < self.config.max_retries:
+                        delay = min(
+                            self.config.retry_base_delay * (2**attempt),
+                            self.config.retry_max_delay,
+                        )
+                        logger.warning(
+                            "Item %d attempt %d failed: %s. Retrying in %.1fs",
+                            index,
+                            attempt + 1,
+                            exc,
+                            delay,
+                        )
+                        await asyncio.sleep(delay)
+                    else:
+                        result.error = str(exc)
+                        result.latency_ms = (time.monotonic() - start) * 1000
+                        self.stats.failed += 1
+                        self.stats.total_latency_ms += result.latency_ms
+                        logger.error(
+                            "Item %d failed after %d attempts: %s",
+                            index,
+                            attempt + 1,
+                            exc,
+                        )
+                        return result
+
+            # shouldn't reach here, but just in case
+            return result
+
+    def _load_checkpoint(self, checkpoint_path: Path) -> None:
+        """Load previously completed results from checkpoint."""
+        if not checkpoint_path.exists():
+            return
+        try:
+            with open(checkpoint_path, encoding="utf-8") as f:
+                for line in f:
+                    data = json.loads(line)
+                    idx = data["index"]
+                    self._completed_indices.add(idx)
+                    self._results.append(
+                        BatchResult(
+                            index=idx,
+                            input_text=data.get("input", ""),
+                            output_text=data.get("output"),
+                            error=data.get("error"),
+                            tokens_in=data.get("tokens_in", 0),
+                            tokens_out=data.get("tokens_out", 0),
+                            latency_ms=data.get("latency_ms", 0),
+                        )
+                    )
+            logger.info("Loaded %d results from checkpoint", len(self._completed_indices))
+        except Exception as exc:
+            logger.warning("Failed to load checkpoint: %s", exc)
+
+    def _save_checkpoint(self, result: BatchResult) -> None:
+        """Append a result to the checkpoint file."""
+        if self._checkpoint_path is None:
+            return
+        try:
+            with open(self._checkpoint_path, "a", encoding="utf-8") as f:
+                data = {
+                    "index": result.index,
+                    "input": result.input_text,
+                    "output": result.output_text,
+                    "error": result.error,
+                    "tokens_in": result.tokens_in,
+                    "tokens_out": result.tokens_out,
+                    "latency_ms": result.latency_ms,
+                }
+                f.write(json.dumps(data, ensure_ascii=False) + "\n")
+        except Exception as exc:
+            logger.warning("Failed to save checkpoint: %s", exc)
+
+    async def process_items(
+        self,
+        items: list[str],
+        on_progress: Callable[[BatchResult, BatchStats], None] | None = None,
+        checkpoint_path: str | Path | None = None,
+    ) -> list[BatchResult]:
+        """Process a list of input strings through the LLM.
+
+        Args:
+            items: List of input texts.
+            on_progress: Callback for each completed item.
+            checkpoint_path: Path for checkpoint file (enables resume).
+
+        Returns:
+            List of BatchResult objects.
+        """
+        self.stats = BatchStats(total=len(items), start_time=time.time())
+        self._results = []
+        self._completed_indices = set()
+        self._semaphore = asyncio.Semaphore(self.config.max_concurrent)
+
+        if checkpoint_path:
+            self._checkpoint_path = Path(checkpoint_path)
+            self._load_checkpoint(self._checkpoint_path)
+            self.stats.completed = len([r for r in self._results if r.error is None])
+            self.stats.failed = len([r for r in self._results if r.error is not None])
+
+        # build task list, skipping already-done items
+        tasks = []
+        for i, text in enumerate(items):
+            if i in self._completed_indices:
+                continue
+            tasks.append(self._process_one(i, text))
+
+        # run all tasks concurrently (semaphore controls parallelism)
+        for coro in asyncio.as_completed(tasks):
+            result = await coro
+            self._results.append(result)
+            self._save_checkpoint(result)
+            if on_progress:
+                on_progress(result, self.stats)
+
+        self.stats.end_time = time.time()
+
+        # sort by original index
+        self._results.sort(key=lambda r: r.index)
+        return self._results
+
+    async def process_file(
+        self,
+        input_path: str | Path,
+        output_path: str | Path | None = None,
+        on_progress: Callable[[BatchResult, BatchStats], None] | None = None,
+        checkpoint_path: str | Path | None = None,
+    ) -> list[BatchResult]:
+        """Process a CSV or JSONL file.
+
+        Args:
+            input_path: Path to input file (.csv or .jsonl).
+            output_path: Path for output file. Defaults to input_path with .out suffix.
+            on_progress: Progress callback.
+            checkpoint_path: Checkpoint file path.
+
+        Returns:
+            List of results.
+        """
+        input_path = Path(input_path)
+        items = self._read_input(input_path)
+
+        results = await self.process_items(items, on_progress, checkpoint_path)
+
+        if output_path is None:
+            suffix = input_path.suffix
+            output_path = input_path.with_suffix(f".out{suffix}")
+
+        self._write_output(Path(output_path), results, input_path)
+        return results
+
+    def _read_input(self, path: Path) -> list[str]:
+        """Read input texts from CSV or JSONL."""
+        suffix = path.suffix.lower()
+        items = []
+
+        if suffix == ".jsonl":
+            with open(path, encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    data = json.loads(line)
+                    if isinstance(data, str):
+                        items.append(data)
+                    elif isinstance(data, dict):
+                        items.append(str(data.get(self.config.input_column, data.get("text", ""))))
+                    else:
+                        items.append(str(data))
+        elif suffix == ".csv":
+            with open(path, encoding="utf-8", newline="") as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    text = row.get(self.config.input_column, "")
+                    items.append(str(text))
+        else:
+            # plain text, one item per line
+            with open(path, encoding="utf-8") as f:
+                items = [line.rstrip("\n") for line in f if line.strip()]
+
+        return items
+
+    def _write_output(self, path: Path, results: list[BatchResult], input_path: Path) -> None:
+        """Write results to CSV or JSONL."""
+        suffix = path.suffix.lower()
+
+        if suffix == ".jsonl" or input_path.suffix.lower() == ".jsonl":
+            with open(path, "w", encoding="utf-8") as f:
+                for r in results:
+                    data = {
+                        self.config.input_column: r.input_text,
+                        self.config.output_column: r.output_text,
+                        "error": r.error,
+                        "tokens_in": r.tokens_in,
+                        "tokens_out": r.tokens_out,
+                        "latency_ms": round(r.latency_ms, 1),
+                    }
+                    f.write(json.dumps(data, ensure_ascii=False) + "\n")
+        else:
+            with open(path, "w", encoding="utf-8", newline="") as f:
+                writer = csv.DictWriter(
+                    f,
+                    fieldnames=[
+                        self.config.input_column,
+                        self.config.output_column,
+                        "error",
+                        "tokens_in",
+                        "tokens_out",
+                        "latency_ms",
+                    ],
+                )
+                writer.writeheader()
+                for r in results:
+                    writer.writerow(
+                        {
+                            self.config.input_column: r.input_text,
+                            self.config.output_column: r.output_text or "",
+                            "error": r.error or "",
+                            "tokens_in": r.tokens_in,
+                            "tokens_out": r.tokens_out,
+                            "latency_ms": round(r.latency_ms, 1),
+                        }
+                    )
