@@ -177,11 +177,11 @@ Includes pricing for 30+ models:
 
 | Provider | Models |
 |----------|--------|
-| OpenAI | gpt-4o, gpt-4o-mini, gpt-4-turbo, gpt-3.5-turbo, o1, o1-mini, o3-mini |
-| Anthropic | claude-opus-4-6, claude-sonnet-4-6, claude-haiku-4-5, claude-3.5-sonnet, claude-3-haiku |
-| Google | gemini-2.0-flash, gemini-1.5-pro, gemini-1.5-flash |
+| OpenAI | gpt-5, gpt-5-mini, gpt-5-nano, gpt-4o, gpt-4o-mini, o3, o3-mini |
+| Anthropic | claude-opus-4-7, claude-sonnet-4-6, claude-haiku-4-5 |
+| Google | gemini-2.5-pro, gemini-2.5-flash, gemini-2.0-flash |
 | DeepSeek | deepseek-chat, deepseek-reasoner |
-| Mistral | mistral-large, mistral-small |
+| Mistral | mistral-large-latest, mistral-small-latest |
 
 Custom pricing can be passed via the Python API.
 
