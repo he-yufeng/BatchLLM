@@ -7,7 +7,7 @@ name = "batchllm"
 version = "0.1.0"
 description = "Batch processing for LLM APIs - CSV/JSONL in, processed out. With retries, rate limiting, and cost tracking."
 readme = "README.md"
-license = { text = "MIT" }
+license = "MIT"
 requires-python = ">=3.9"
 authors = [{ name = "Yufeng He", email = "40085740+he-yufeng@users.noreply.github.com" }]
 keywords = [
@@ -24,7 +24,6 @@ classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
     "Intended Audience :: Science/Research",
-    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
