@@ -193,31 +193,40 @@ class BatchProcessor:
         if not checkpoint_path.exists():
             return
         try:
+            loaded: dict[int, BatchResult] = {}
             with open(checkpoint_path, encoding="utf-8") as f:
                 for line in f:
                     data = json.loads(line)
                     idx = data["index"]
-                    self._completed_indices.add(idx)
-                    self._results.append(
-                        BatchResult(
-                            index=idx,
-                            input_text=data.get("input", ""),
-                            output_text=data.get("output"),
-                            error=data.get("error"),
-                            tokens_in=data.get("tokens_in", 0),
-                            tokens_out=data.get("tokens_out", 0),
-                            latency_ms=data.get("latency_ms", 0),
-                        )
+                    loaded[idx] = BatchResult(
+                        index=idx,
+                        input_text=data.get("input", ""),
+                        output_text=data.get("output"),
+                        error=data.get("error"),
+                        tokens_in=data.get("tokens_in", 0),
+                        tokens_out=data.get("tokens_out", 0),
+                        latency_ms=data.get("latency_ms", 0),
                     )
+            self._completed_indices.update(loaded)
+            self._results.extend(sorted(loaded.values(), key=lambda r: r.index))
             logger.info("Loaded %d results from checkpoint", len(self._completed_indices))
         except Exception as exc:
             logger.warning("Failed to load checkpoint: %s", exc)
+
+    def _restore_stats_from_results(self) -> None:
+        """Rebuild stats for rows loaded from checkpoint."""
+        self.stats.completed = len([r for r in self._results if r.error is None])
+        self.stats.failed = len([r for r in self._results if r.error is not None])
+        self.stats.total_tokens_in = sum(r.tokens_in for r in self._results)
+        self.stats.total_tokens_out = sum(r.tokens_out for r in self._results)
+        self.stats.total_latency_ms = sum(r.latency_ms for r in self._results)
 
     def _save_checkpoint(self, result: BatchResult) -> None:
         """Append a result to the checkpoint file."""
         if self._checkpoint_path is None:
             return
         try:
+            self._checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
             with open(self._checkpoint_path, "a", encoding="utf-8") as f:
                 data = {
                     "index": result.index,
@@ -256,8 +265,7 @@ class BatchProcessor:
         if checkpoint_path:
             self._checkpoint_path = Path(checkpoint_path)
             self._load_checkpoint(self._checkpoint_path)
-            self.stats.completed = len([r for r in self._results if r.error is None])
-            self.stats.failed = len([r for r in self._results if r.error is not None])
+            self._restore_stats_from_results()
 
         # build task list, skipping already-done items
         tasks = []

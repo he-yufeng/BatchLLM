@@ -59,6 +59,8 @@ batchllm run data.csv -m gpt-4o-mini -c 20 -o results.csv
 # 中断后断点续传
 batchllm run data.csv -m gpt-4o-mini --checkpoint data.ckpt
 
+# 已恢复的行仍会计入最终 token、延迟和费用汇总
+
 # 运行前估算费用
 batchllm estimate data.csv -m gpt-4o
 

@@ -170,6 +170,13 @@ class TestCheckpoint:
         assert len(new_proc._results) == 1
         assert new_proc._results[0].output_text == "response"
 
+    def test_save_creates_checkpoint_parent(self, processor, tmp_path):
+        ckpt = tmp_path / "nested" / "checkpoint.jsonl"
+        processor._checkpoint_path = ckpt
+        processor._save_checkpoint(BatchResult(index=0, input_text="test", output_text="ok"))
+
+        assert ckpt.exists()
+
 
 @pytest.mark.asyncio
 async def test_process_items_mock(config):
@@ -187,3 +194,55 @@ async def test_process_items_mock(config):
     assert proc.stats.failed == 0
     assert proc.stats.total_tokens_in == 20
     assert proc.stats.total_tokens_out == 40
+
+
+@pytest.mark.asyncio
+async def test_process_items_restores_checkpoint_stats(config, tmp_path):
+    ckpt = tmp_path / "checkpoint.jsonl"
+    ckpt.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "index": 0,
+                        "input": "already done",
+                        "output": "cached",
+                        "error": None,
+                        "tokens_in": 7,
+                        "tokens_out": 11,
+                        "latency_ms": 123.4,
+                    }
+                ),
+                json.dumps(
+                    {
+                        "index": 2,
+                        "input": "already failed",
+                        "output": None,
+                        "error": "boom",
+                        "tokens_in": 0,
+                        "tokens_out": 0,
+                        "latency_ms": 50.0,
+                    }
+                ),
+            ]
+        )
+        + "\n"
+    )
+
+    proc = BatchProcessor(config)
+    mock_client = AsyncMock()
+    mock_client.chat.completions.create = AsyncMock(return_value=_mock_response("fresh"))
+    proc._client = mock_client
+
+    results = await proc.process_items(
+        ["already done", "new item", "already failed"],
+        checkpoint_path=ckpt,
+    )
+
+    assert [r.index for r in results] == [0, 1, 2]
+    assert mock_client.chat.completions.create.call_count == 1
+    assert proc.stats.completed == 2
+    assert proc.stats.failed == 1
+    assert proc.stats.total_tokens_in == 17
+    assert proc.stats.total_tokens_out == 31
+    assert proc.stats.total_latency_ms >= 173.4

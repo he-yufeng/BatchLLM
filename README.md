@@ -59,6 +59,8 @@ batchllm run data.csv -m gpt-4o-mini -c 20 -o results.csv
 # Resume from checkpoint after interruption
 batchllm run data.csv -m gpt-4o-mini --checkpoint data.ckpt
 
+# Resumed rows still count toward the final token, latency, and cost summary
+
 # Estimate cost before running
 batchllm estimate data.csv -m gpt-4o
 
