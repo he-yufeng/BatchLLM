@@ -333,21 +333,33 @@ class BatchProcessor:
                     if isinstance(data, str):
                         items.append(data)
                     elif isinstance(data, dict):
-                        items.append(str(data.get(self.config.input_column, data.get("text", ""))))
+                        items.append(self._read_mapping_input(data, path=path))
                     else:
                         items.append(str(data))
         elif suffix == ".csv":
             with open(path, encoding="utf-8", newline="") as f:
                 reader = csv.DictReader(f)
+                if reader.fieldnames is None or self.config.input_column not in reader.fieldnames:
+                    available = ", ".join(reader.fieldnames or [])
+                    raise ValueError(
+                        f"{path}: missing input column {self.config.input_column!r}"
+                        + (f" (available: {available})" if available else "")
+                    )
                 for row in reader:
-                    text = row.get(self.config.input_column, "")
-                    items.append(str(text))
+                    items.append(str(row[self.config.input_column]))
         else:
             # plain text, one item per line
             with open(path, encoding="utf-8") as f:
                 items = [line.rstrip("\n") for line in f if line.strip()]
 
         return items
+
+    def _read_mapping_input(self, data: dict[str, Any], path: Path) -> str:
+        if self.config.input_column in data:
+            return str(data[self.config.input_column])
+        if self.config.input_column != "text" and "text" in data:
+            return str(data["text"])
+        raise ValueError(f"{path}: JSONL object is missing {self.config.input_column!r}")
 
     def _write_output(self, path: Path, results: list[BatchResult], input_path: Path) -> None:
         """Write results to CSV or JSONL."""

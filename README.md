@@ -137,6 +137,8 @@ input,category
 {"input": "Terrible service", "category": "complaint"}
 ```
 
+BatchLLM fails fast if the configured CSV column or JSONL field is missing. That is intentional: a batch job should not silently turn bad input into thousands of empty prompts.
+
 **Plain text** — one item per line:
 ```
 This movie was great

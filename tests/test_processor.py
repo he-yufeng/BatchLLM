@@ -95,6 +95,22 @@ class TestReadInput:
         items = processor._read_input(jsonl_file)
         assert items == ["hello", "world"]
 
+    def test_read_jsonl_text_fallback(self, processor, tmp_path):
+        jsonl_file = tmp_path / "data.jsonl"
+        with open(jsonl_file, "w") as f:
+            f.write(json.dumps({"text": "hello"}) + "\n")
+
+        items = processor._read_input(jsonl_file)
+        assert items == ["hello"]
+
+    def test_read_jsonl_missing_input_fails(self, processor, tmp_path):
+        jsonl_file = tmp_path / "data.jsonl"
+        with open(jsonl_file, "w") as f:
+            f.write(json.dumps({"question": "hello"}) + "\n")
+
+        with pytest.raises(ValueError, match="missing 'input'"):
+            processor._read_input(jsonl_file)
+
     def test_read_plain_text(self, processor, tmp_path):
         txt_file = tmp_path / "data.txt"
         txt_file.write_text("line one\nline two\n\nline three\n")
@@ -110,6 +126,16 @@ class TestReadInput:
 
         items = processor._read_input(jsonl_file)
         assert items == ["hello", "world"]
+
+    def test_read_csv_missing_input_column_fails(self, processor, tmp_path):
+        csv_file = tmp_path / "data.csv"
+        with open(csv_file, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=["question"])
+            writer.writeheader()
+            writer.writerow({"question": "hello"})
+
+        with pytest.raises(ValueError, match="missing input column 'input'"):
+            processor._read_input(csv_file)
 
 
 class TestWriteOutput:

@@ -137,6 +137,8 @@ input,category
 {"input": "Terrible service", "category": "complaint"}
 ```
 
+如果配置的 CSV 列名或 JSONL 字段不存在，BatchLLM 会直接报错停止。这样做是故意的：批量任务不应该把坏输入静默变成几千条空 prompt。
+
 **纯文本** — 每行一条：
 ```
 This movie was great
