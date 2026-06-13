@@ -61,6 +61,9 @@ batchllm run data.csv -m gpt-4o-mini --checkpoint data.ckpt
 
 # Resumed rows still count toward the final token, latency, and cost summary
 
+# Validate input format before spending money on API calls
+batchllm validate data.csv --min-items 100
+
 # Estimate cost before running
 batchllm estimate data.csv -m gpt-4o
 
@@ -138,6 +141,12 @@ input,category
 ```
 
 BatchLLM fails fast if the configured CSV column or JSONL field is missing. That is intentional: a batch job should not silently turn bad input into thousands of empty prompts.
+
+You can check the input without calling a model:
+
+```bash
+batchllm validate data.csv --input-column input --min-items 100
+```
 
 **Plain text** — one item per line:
 ```

@@ -152,6 +152,41 @@ def estimate(input_file: str, model: str, input_column: str):
     console.print(table)
 
 
+@main.command()
+@click.argument("input_file", type=click.Path(exists=True))
+@click.option("--input-column", default="input", help="Column name or JSONL field for input text.")
+@click.option("--min-items", default=1, type=int, help="Minimum number of rows/items required.")
+def validate(input_file: str, input_column: str, min_items: int):
+    """Validate an input file without making API calls."""
+    if min_items <= 0:
+        raise click.UsageError("--min-items must be greater than zero")
+
+    config = BatchConfig(input_column=input_column)
+    processor = BatchProcessor(config)
+    try:
+        items = processor._read_input(Path(input_file))
+    except Exception as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    if len(items) < min_items:
+        raise click.ClickException(
+            f"Only found {len(items)} item(s), but --min-items is {min_items}."
+        )
+
+    preview = items[0][:120].replace("\n", " ") if items else ""
+    table = Table(title="Input Validation")
+    table.add_column("Metric", style="bold cyan")
+    table.add_column("Value")
+    table.add_row("File", input_file)
+    table.add_row("Input column", input_column)
+    table.add_row("Items", f"{len(items):,}")
+    if preview:
+        table.add_row("First item", preview)
+
+    console.print("[green]BatchLLM input looks valid.[/green]")
+    console.print(table)
+
+
 def _print_summary(stats: BatchStats, model: str, output_path: str):
     cost = estimate_cost(model, stats.total_tokens_in, stats.total_tokens_out)
 

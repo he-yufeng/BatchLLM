@@ -61,6 +61,9 @@ batchllm run data.csv -m gpt-4o-mini --checkpoint data.ckpt
 
 # 已恢复的行仍会计入最终 token、延迟和费用汇总
 
+# 花钱调用 API 前先验证输入格式和样本数量
+batchllm validate data.csv --min-items 100
+
 # 运行前估算费用
 batchllm estimate data.csv -m gpt-4o
 
@@ -138,6 +141,12 @@ input,category
 ```
 
 如果配置的 CSV 列名或 JSONL 字段不存在，BatchLLM 会直接报错停止。这样做是故意的：批量任务不应该把坏输入静默变成几千条空 prompt。
+
+你也可以先离线检查输入，不调用模型、不花钱：
+
+```bash
+batchllm validate data.csv --input-column input --min-items 100
+```
 
 **纯文本** — 每行一条：
 ```
