@@ -26,7 +26,7 @@ BatchLLM 把这些全打包成一个 CLI 命令和 Python API。
 
 - **并发处理** — 基于 asyncio semaphore 的可配置并行度
 - **自动重试** — 指数退避，可配置最大重试次数
-- **断点续传** — JSONL 格式 checkpoint，中断后从上次停的地方继续
+- **安全断点续传** — JSONL checkpoint 会校验输入和模型配置，避免误续跑到另一批任务
 - **费用追踪** — 实时 token 计数，内置 30+ 模型定价
 - **费用预估** — 运行前估算 token 数和费用（使用 tiktoken）
 - **多种输入格式** — CSV、JSONL、纯文本
@@ -60,6 +60,7 @@ batchllm run data.csv -m gpt-4o-mini -c 20 -o results.csv
 batchllm run data.csv -m gpt-4o-mini --checkpoint data.ckpt
 
 # 已恢复的行仍会计入最终 token、延迟和费用汇总
+# 如果换了输入、模型、prompt 或采样配置，复用旧 checkpoint 会直接报错
 
 # 花钱调用 API 前先验证输入格式和样本数量
 batchllm validate data.csv --min-items 100

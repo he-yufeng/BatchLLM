@@ -26,7 +26,7 @@ BatchLLM packages all of this into a single CLI command and Python API.
 
 - **Concurrent processing** — configurable parallelism with asyncio semaphore
 - **Automatic retries** — exponential backoff, configurable max retries
-- **Checkpoint/resume** — crash-safe JSONL checkpoints, pick up where you left off
+- **Checkpoint/resume** — crash-safe JSONL checkpoints that reject mismatched inputs or model settings
 - **Cost tracking** — real-time token counting with pricing for 30+ models
 - **Cost estimation** — estimate tokens and cost before running (uses tiktoken)
 - **Multiple input formats** — CSV, JSONL, plain text
@@ -60,6 +60,7 @@ batchllm run data.csv -m gpt-4o-mini -c 20 -o results.csv
 batchllm run data.csv -m gpt-4o-mini --checkpoint data.ckpt
 
 # Resumed rows still count toward the final token, latency, and cost summary
+# Reusing data.ckpt with another input, model, prompt, or sampling config fails fast
 
 # Validate input format before spending money on API calls
 batchllm validate data.csv --min-items 100

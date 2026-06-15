@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import csv
+import hashlib
 import json
 import logging
 import time
@@ -97,6 +98,7 @@ class BatchProcessor:
         self.stats = BatchStats()
         self._results: list[BatchResult] = []
         self._checkpoint_path: Path | None = None
+        self._checkpoint_fingerprint: str | None = None
         self._completed_indices: set[int] = set()
 
     def _get_client(self) -> AsyncOpenAI:
@@ -188,16 +190,46 @@ class BatchProcessor:
             # shouldn't reach here, but just in case
             return result
 
-    def _load_checkpoint(self, checkpoint_path: Path) -> None:
+    def _make_checkpoint_fingerprint(self, items: list[str]) -> str:
+        payload = {
+            "items": items,
+            "model": self.config.model,
+            "system_prompt": self.config.system_prompt,
+            "prompt_template": self.config.prompt_template,
+            "max_tokens": self.config.max_tokens,
+            "temperature": self.config.temperature,
+            "base_url": self.config.base_url,
+            "max_retries": self.config.max_retries,
+            "timeout": self.config.timeout,
+        }
+        raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+    def _load_checkpoint(
+        self,
+        checkpoint_path: Path,
+        expected_fingerprint: str | None = None,
+        items: list[str] | None = None,
+    ) -> None:
         """Load previously completed results from checkpoint."""
         if not checkpoint_path.exists():
             return
         try:
             loaded: dict[int, BatchResult] = {}
+            stored_fingerprint: str | None = None
             with open(checkpoint_path, encoding="utf-8") as f:
                 for line in f:
                     data = json.loads(line)
+                    if "_batchllm_checkpoint" in data:
+                        stored_fingerprint = data.get("fingerprint")
+                        continue
                     idx = data["index"]
+                    if items is not None:
+                        if idx >= len(items) or data.get("input", "") != items[idx]:
+                            raise ValueError(
+                                "Checkpoint does not match the current input. "
+                                "Use a new checkpoint path for this batch."
+                            )
                     loaded[idx] = BatchResult(
                         index=idx,
                         input_text=data.get("input", ""),
@@ -207,9 +239,25 @@ class BatchProcessor:
                         tokens_out=data.get("tokens_out", 0),
                         latency_ms=data.get("latency_ms", 0),
                     )
+            if (
+                expected_fingerprint
+                and stored_fingerprint
+                and stored_fingerprint != expected_fingerprint
+            ):
+                raise ValueError(
+                    "Checkpoint was created for different inputs or model settings. "
+                    "Use a new checkpoint path for this batch."
+                )
+            if expected_fingerprint and loaded and not stored_fingerprint:
+                logger.warning(
+                    "Loaded a legacy checkpoint after verifying its input rows; "
+                    "model and prompt settings cannot be verified."
+                )
             self._completed_indices.update(loaded)
             self._results.extend(sorted(loaded.values(), key=lambda r: r.index))
             logger.info("Loaded %d results from checkpoint", len(self._completed_indices))
+        except ValueError:
+            raise
         except Exception as exc:
             logger.warning("Failed to load checkpoint: %s", exc)
 
@@ -228,6 +276,12 @@ class BatchProcessor:
         try:
             self._checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
             with open(self._checkpoint_path, "a", encoding="utf-8") as f:
+                if self._checkpoint_path.stat().st_size == 0 and self._checkpoint_fingerprint:
+                    metadata = {
+                        "_batchllm_checkpoint": 1,
+                        "fingerprint": self._checkpoint_fingerprint,
+                    }
+                    f.write(json.dumps(metadata) + "\n")
                 data = {
                     "index": result.index,
                     "input": result.input_text,
@@ -261,10 +315,17 @@ class BatchProcessor:
         self._results = []
         self._completed_indices = set()
         self._semaphore = asyncio.Semaphore(self.config.max_concurrent)
+        self._checkpoint_path = None
+        self._checkpoint_fingerprint = None
 
         if checkpoint_path:
             self._checkpoint_path = Path(checkpoint_path)
-            self._load_checkpoint(self._checkpoint_path)
+            self._checkpoint_fingerprint = self._make_checkpoint_fingerprint(items)
+            self._load_checkpoint(
+                self._checkpoint_path,
+                expected_fingerprint=self._checkpoint_fingerprint,
+                items=items,
+            )
             self._restore_stats_from_results()
 
         # build task list, skipping already-done items

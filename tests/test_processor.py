@@ -272,3 +272,46 @@ async def test_process_items_restores_checkpoint_stats(config, tmp_path):
     assert proc.stats.total_tokens_in == 17
     assert proc.stats.total_tokens_out == 31
     assert proc.stats.total_latency_ms >= 173.4
+
+
+@pytest.mark.asyncio
+async def test_checkpoint_rejects_changed_input(config, tmp_path):
+    ckpt = tmp_path / "checkpoint.jsonl"
+    proc = BatchProcessor(config)
+    mock_client = AsyncMock()
+    mock_client.chat.completions.create = AsyncMock(return_value=_mock_response("done"))
+    proc._client = mock_client
+    await proc.process_items(["original"], checkpoint_path=ckpt)
+
+    resumed = BatchProcessor(config)
+    with pytest.raises(ValueError, match="does not match the current input"):
+        await resumed.process_items(["changed"], checkpoint_path=ckpt)
+
+
+@pytest.mark.asyncio
+async def test_checkpoint_rejects_changed_model(config, tmp_path):
+    ckpt = tmp_path / "checkpoint.jsonl"
+    proc = BatchProcessor(config)
+    mock_client = AsyncMock()
+    mock_client.chat.completions.create = AsyncMock(return_value=_mock_response("done"))
+    proc._client = mock_client
+    await proc.process_items(["same input"], checkpoint_path=ckpt)
+
+    resumed = BatchProcessor(BatchConfig(model="different-model"))
+    with pytest.raises(ValueError, match="different inputs or model settings"):
+        await resumed.process_items(["same input"], checkpoint_path=ckpt)
+
+
+@pytest.mark.asyncio
+async def test_process_items_does_not_reuse_previous_checkpoint_path(config, tmp_path):
+    ckpt = tmp_path / "checkpoint.jsonl"
+    proc = BatchProcessor(config)
+    mock_client = AsyncMock()
+    mock_client.chat.completions.create = AsyncMock(return_value=_mock_response("done"))
+    proc._client = mock_client
+    await proc.process_items(["first"], checkpoint_path=ckpt)
+    original = ckpt.read_text(encoding="utf-8")
+
+    await proc.process_items(["second"])
+
+    assert ckpt.read_text(encoding="utf-8") == original
