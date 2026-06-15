@@ -275,6 +275,62 @@ async def test_process_items_restores_checkpoint_stats(config, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_process_items_can_retry_only_failed_checkpoint_rows(config, tmp_path):
+    ckpt = tmp_path / "checkpoint.jsonl"
+    ckpt.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "index": 0,
+                        "input": "already done",
+                        "output": "cached",
+                        "error": None,
+                        "tokens_in": 7,
+                        "tokens_out": 11,
+                        "latency_ms": 123.4,
+                    }
+                ),
+                json.dumps(
+                    {
+                        "index": 1,
+                        "input": "retry me",
+                        "output": None,
+                        "error": "timeout",
+                        "tokens_in": 0,
+                        "tokens_out": 0,
+                        "latency_ms": 50.0,
+                    }
+                ),
+            ]
+        )
+        + "\n"
+    )
+
+    proc = BatchProcessor(config)
+    mock_client = AsyncMock()
+    mock_client.chat.completions.create = AsyncMock(return_value=_mock_response("recovered"))
+    proc._client = mock_client
+
+    results = await proc.process_items(
+        ["already done", "retry me"],
+        checkpoint_path=ckpt,
+        retry_failed=True,
+    )
+
+    assert mock_client.chat.completions.create.call_count == 1
+    assert [result.output_text for result in results] == ["cached", "recovered"]
+    assert proc.stats.completed == 2
+    assert proc.stats.failed == 0
+
+    resumed = BatchProcessor(config)
+    resumed._client = mock_client
+    await resumed.process_items(["already done", "retry me"], checkpoint_path=ckpt)
+    assert resumed.stats.completed == 2
+    assert resumed.stats.failed == 0
+
+
+@pytest.mark.asyncio
 async def test_checkpoint_rejects_changed_input(config, tmp_path):
     ckpt = tmp_path / "checkpoint.jsonl"
     proc = BatchProcessor(config)

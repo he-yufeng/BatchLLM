@@ -210,6 +210,7 @@ class BatchProcessor:
         checkpoint_path: Path,
         expected_fingerprint: str | None = None,
         items: list[str] | None = None,
+        retry_failed: bool = False,
     ) -> None:
         """Load previously completed results from checkpoint."""
         if not checkpoint_path.exists():
@@ -253,8 +254,13 @@ class BatchProcessor:
                     "Loaded a legacy checkpoint after verifying its input rows; "
                     "model and prompt settings cannot be verified."
                 )
-            self._completed_indices.update(loaded)
-            self._results.extend(sorted(loaded.values(), key=lambda r: r.index))
+            reusable = {
+                index: result
+                for index, result in loaded.items()
+                if not (retry_failed and result.error is not None)
+            }
+            self._completed_indices.update(reusable)
+            self._results.extend(sorted(reusable.values(), key=lambda r: r.index))
             logger.info("Loaded %d results from checkpoint", len(self._completed_indices))
         except ValueError:
             raise
@@ -300,6 +306,7 @@ class BatchProcessor:
         items: list[str],
         on_progress: Callable[[BatchResult, BatchStats], None] | None = None,
         checkpoint_path: str | Path | None = None,
+        retry_failed: bool = False,
     ) -> list[BatchResult]:
         """Process a list of input strings through the LLM.
 
@@ -307,6 +314,7 @@ class BatchProcessor:
             items: List of input texts.
             on_progress: Callback for each completed item.
             checkpoint_path: Path for checkpoint file (enables resume).
+            retry_failed: Reprocess failed rows while reusing successful rows.
 
         Returns:
             List of BatchResult objects.
@@ -325,6 +333,7 @@ class BatchProcessor:
                 self._checkpoint_path,
                 expected_fingerprint=self._checkpoint_fingerprint,
                 items=items,
+                retry_failed=retry_failed,
             )
             self._restore_stats_from_results()
 
@@ -355,6 +364,7 @@ class BatchProcessor:
         output_path: str | Path | None = None,
         on_progress: Callable[[BatchResult, BatchStats], None] | None = None,
         checkpoint_path: str | Path | None = None,
+        retry_failed: bool = False,
     ) -> list[BatchResult]:
         """Process a CSV or JSONL file.
 
@@ -363,6 +373,7 @@ class BatchProcessor:
             output_path: Path for output file. Defaults to input_path with .out suffix.
             on_progress: Progress callback.
             checkpoint_path: Checkpoint file path.
+            retry_failed: Reprocess failed checkpoint rows.
 
         Returns:
             List of results.
@@ -370,7 +381,7 @@ class BatchProcessor:
         input_path = Path(input_path)
         items = self._read_input(input_path)
 
-        results = await self.process_items(items, on_progress, checkpoint_path)
+        results = await self.process_items(items, on_progress, checkpoint_path, retry_failed)
 
         if output_path is None:
             suffix = input_path.suffix

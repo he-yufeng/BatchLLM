@@ -59,6 +59,9 @@ batchllm run data.csv -m gpt-4o-mini -c 20 -o results.csv
 # 中断后断点续传
 batchllm run data.csv -m gpt-4o-mini --checkpoint data.ckpt
 
+# 只重试 checkpoint 中失败的行，保留成功结果
+batchllm run data.csv -m gpt-4o-mini --checkpoint data.ckpt --retry-failed
+
 # 已恢复的行仍会计入最终 token、延迟和费用汇总
 # 如果换了输入、模型、prompt 或采样配置，复用旧 checkpoint 会直接报错
 

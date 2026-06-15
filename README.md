@@ -59,6 +59,9 @@ batchllm run data.csv -m gpt-4o-mini -c 20 -o results.csv
 # Resume from checkpoint after interruption
 batchllm run data.csv -m gpt-4o-mini --checkpoint data.ckpt
 
+# Retry only failed checkpoint rows, while keeping successful results
+batchllm run data.csv -m gpt-4o-mini --checkpoint data.ckpt --retry-failed
+
 # Resumed rows still count toward the final token, latency, and cost summary
 # Reusing data.ckpt with another input, model, prompt, or sampling config fails fast
 

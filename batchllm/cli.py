@@ -48,6 +48,11 @@ def main():
 @click.option("--api-key", envvar="OPENAI_API_KEY", help="API key (or set OPENAI_API_KEY).")
 @click.option("--base-url", envvar="OPENAI_BASE_URL", help="API base URL for compatible providers.")
 @click.option("--checkpoint", type=click.Path(), help="Checkpoint file for resume support.")
+@click.option(
+    "--retry-failed",
+    is_flag=True,
+    help="Retry failed checkpoint rows while reusing successful rows.",
+)
 @click.option("--input-column", default="input", help="Column name for input text.")
 @click.option("--output-column", default="output", help="Column name for output text.")
 def run(
@@ -63,10 +68,14 @@ def run(
     api_key: str | None,
     base_url: str | None,
     checkpoint: str | None,
+    retry_failed: bool,
     input_column: str,
     output_column: str,
 ):
     """Process an input file (CSV/JSONL/TXT) through an LLM."""
+    if retry_failed and not checkpoint:
+        raise click.UsageError("--retry-failed requires --checkpoint")
+
     config = BatchConfig(
         model=model,
         system_prompt=system,
@@ -103,6 +112,7 @@ def run(
                 output_path=output,
                 on_progress=on_progress,
                 checkpoint_path=checkpoint,
+                retry_failed=retry_failed,
             )
         )
 
