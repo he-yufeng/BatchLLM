@@ -132,8 +132,8 @@ class BatchProcessor:
             messages = self._build_messages(input_text)
 
             for attempt in range(self.config.max_retries + 1):
+                start = time.monotonic()
                 try:
-                    start = time.monotonic()
                     client = self._get_client()
 
                     kwargs: dict[str, Any] = {
