@@ -28,7 +28,7 @@ BatchLLM 把这些全打包成一个 CLI 命令和 Python API。
 - **自动重试** — 指数退避，可配置最大重试次数
 - **安全断点续传** — JSONL checkpoint 会校验输入和模型配置，避免误续跑到另一批任务
 - **费用追踪** — 实时 token 计数，内置 30+ 模型定价
-- **费用预估** — 运行前估算 token 数和费用（使用 tiktoken）
+- **运行前预估** — 离线估算行数、token 和费用，断点续传时还会算出还剩多少没跑
 - **多种输入格式** — CSV、JSONL、纯文本
 - **兼容任何 OpenAI API** — OpenAI、DeepSeek、本地模型等
 - **Prompt 模板** — 用 `{input}` 占位符自定义 prompt
@@ -167,6 +167,50 @@ input,output,error,tokens_in,tokens_out,latency_ms
 "This movie was great","Positive sentiment","",15,3,234.5
 "Terrible service","Negative sentiment","",12,3,198.2
 ```
+
+## 运行前预估
+
+跑大任务前先 dry-run 一下，看清规模和花费，全程不碰 API：
+
+```bash
+$ batchllm estimate data.csv -m gpt-4o -s "You are concise" -t "Summarize: {input}"
+```
+
+```
+                       Run Estimate
+┌────────────────────┬───────────────┐
+│ Metric             │ Value         │
+├────────────────────┼───────────────┤
+│ File               │ data.csv      │
+│ Model              │ gpt-4o        │
+│ Rows               │ 10,000        │
+│ Est. input tokens  │ ~1,420,000    │
+│ Est. output tokens │ ~1,250,000    │
+│ Est. cost          │ $16.05        │
+└────────────────────┴───────────────┘
+```
+
+token 用一个透明的启发式来估：大约 4 个字符算 1 个 token，再加上每条 chat 消息的固定开销，
+而且是在**完整渲染后**的 prompt 上算的，所以模板和系统提示都会算进去。不下载分词器、不联网、
+不调 API。输出 token 默认按输入的 1:1 估算，可以用 `--output-ratio` 调比例，或用 `--max-tokens`
+封顶。
+
+加上 `--checkpoint` 后，只统计还没跑完的行，于是你能看到续跑实际还要花多少：
+
+```bash
+$ batchllm estimate data.csv -m gpt-4o --checkpoint data.ckpt
+```
+
+```
+│ Rows               │ 10,000        │
+│ Already done       │ 6,200         │
+│ Previously failed  │ 130           │
+│ Remaining          │ 3,800         │
+│ Est. cost          │ $6.09         │
+```
+
+默认情况下失败的行被视为已经处理过（和普通续跑一致）。加上 `--retry-failed` 就把它们算成还要重跑的工作量，
+行为和 `run --retry-failed` 一致。
 
 ## 支持的模型（费用追踪）
 

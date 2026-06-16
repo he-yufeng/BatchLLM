@@ -28,7 +28,7 @@ BatchLLM packages all of this into a single CLI command and Python API.
 - **Automatic retries** — exponential backoff, configurable max retries
 - **Checkpoint/resume** — crash-safe JSONL checkpoints that reject mismatched inputs or model settings
 - **Cost tracking** — real-time token counting with pricing for 30+ models
-- **Cost estimation** — estimate tokens and cost before running (uses tiktoken)
+- **Pre-run estimate** — project rows, tokens, and cost offline, including what a checkpoint resume still has left to do
 - **Multiple input formats** — CSV, JSONL, plain text
 - **Any OpenAI-compatible API** — OpenAI, Anthropic (via proxy), DeepSeek, local models, etc.
 - **Prompt templates** — customize prompts with `{input}` placeholder
@@ -168,25 +168,52 @@ input,output,error,tokens_in,tokens_out,latency_ms
 "Terrible service","Negative sentiment","",12,3,198.2
 ```
 
-## Cost Estimation
+## Estimate Before Running
 
-Estimate before running to avoid surprises:
+Dry-run a job to see how big it is and what it will cost, without touching the API:
 
 ```bash
-$ batchllm estimate data.csv -m gpt-4o
+$ batchllm estimate data.csv -m gpt-4o -s "You are concise" -t "Summarize: {input}"
 ```
 
 ```
-┌──────────────────┬───────────────┐
-│ Metric           │ Value         │
-├──────────────────┼───────────────┤
-│ Items            │ 10,000        │
-│ Est. Input Tokens│ 1,250,000     │
-│ Est. Output      │ ~1,250,000    │
-│ Model            │ gpt-4o        │
-│ Est. Cost        │ $15.63        │
-└──────────────────┴───────────────┘
+                       Run Estimate
+┌────────────────────┬───────────────┐
+│ Metric             │ Value         │
+├────────────────────┼───────────────┤
+│ File               │ data.csv      │
+│ Model              │ gpt-4o        │
+│ Rows               │ 10,000        │
+│ Est. input tokens  │ ~1,420,000    │
+│ Est. output tokens │ ~1,250,000    │
+│ Est. cost          │ $16.05        │
+└────────────────────┴───────────────┘
 ```
+
+Tokens are sized with a transparent heuristic — roughly 4 characters per token plus
+the usual per-message chat overhead — applied to the *fully rendered* prompt, so your
+template and system prompt are included. No tokenizer download, no network, no API
+calls. Output is projected as a 1:1 ratio of the input by default; tune it with
+`--output-ratio` or cap it with `--max-tokens`.
+
+Point it at a checkpoint and the estimate only counts the rows still left to run, so
+you see what a resume would actually spend:
+
+```bash
+$ batchllm estimate data.csv -m gpt-4o --checkpoint data.ckpt
+```
+
+```
+│ Rows               │ 10,000        │
+│ Already done       │ 6,200         │
+│ Previously failed  │ 130           │
+│ Remaining          │ 3,800         │
+│ Est. cost          │ $6.09         │
+```
+
+By default the failed rows are treated as already accounted for, matching a plain
+resume. Add `--retry-failed` to count them as work still to do, the same way
+`run --retry-failed` does.
 
 ## Supported Models (Cost Tracking)
 

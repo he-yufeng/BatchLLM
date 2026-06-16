@@ -11,6 +11,7 @@ from rich.progress import BarColumn, MofNCompleteColumn, Progress, TextColumn, T
 from rich.table import Table
 
 from batchllm.cost import estimate_cost, format_cost
+from batchllm.estimate import estimate_batch
 from batchllm.processor import BatchConfig, BatchProcessor, BatchResult, BatchStats
 
 console = Console()
@@ -124,42 +125,80 @@ def run(
 @main.command()
 @click.argument("input_file", type=click.Path(exists=True))
 @click.option("-m", "--model", default="gpt-4o-mini", help="Model name for cost estimation.")
+@click.option("-s", "--system", type=str, help="System prompt, matching your run command.")
+@click.option(
+    "-t", "--template", default="{input}", help="Prompt template. Use {input} placeholder."
+)
+@click.option("--max-tokens", type=int, help="Cap estimated output tokens per row.")
+@click.option(
+    "--output-ratio",
+    default=1.0,
+    type=float,
+    help="Estimated output tokens as a multiple of input (default 1.0).",
+)
+@click.option(
+    "--checkpoint", type=click.Path(), help="Checkpoint file; only unfinished rows count."
+)
+@click.option(
+    "--retry-failed",
+    is_flag=True,
+    help="Count failed checkpoint rows as work still to do.",
+)
 @click.option("--input-column", default="input", help="Column name for input text.")
-def estimate(input_file: str, model: str, input_column: str):
-    """Estimate token count and cost without making any API calls."""
-    try:
-        import tiktoken
-    except ImportError:
-        console.print("[red]tiktoken required for estimation: pip install tiktoken[/red]")
-        return
+def estimate(
+    input_file: str,
+    model: str,
+    system: str | None,
+    template: str,
+    max_tokens: int | None,
+    output_ratio: float,
+    checkpoint: str | None,
+    retry_failed: bool,
+    input_column: str,
+):
+    """Estimate rows, tokens, and cost before running. Makes no API calls."""
+    if output_ratio < 0:
+        raise click.UsageError("--output-ratio must be non-negative")
+    if retry_failed and not checkpoint:
+        raise click.UsageError("--retry-failed requires --checkpoint")
 
-    config = BatchConfig(model=model, input_column=input_column)
+    config = BatchConfig(
+        model=model,
+        system_prompt=system,
+        prompt_template=template,
+        max_tokens=max_tokens,
+        input_column=input_column,
+    )
     processor = BatchProcessor(config)
-    items = processor._read_input(Path(input_file))
-
-    # try to get the right encoder
     try:
-        enc = tiktoken.encoding_for_model(model)
-    except KeyError:
-        enc = tiktoken.get_encoding("cl100k_base")
+        rows = processor._read_input(Path(input_file))
+        est = estimate_batch(
+            config,
+            rows,
+            output_ratio=output_ratio,
+            checkpoint_path=checkpoint,
+            retry_failed=retry_failed,
+        )
+    except Exception as exc:
+        raise click.ClickException(str(exc)) from exc
 
-    total_tokens = sum(len(enc.encode(item)) for item in items)
-
-    # rough estimate: output ~= input for translation/rewriting, ~0.5x for summarization
-    est_output = total_tokens  # conservative 1:1 ratio
-
-    cost = estimate_cost(model, total_tokens, est_output)
-
-    table = Table(title="Cost Estimate")
+    table = Table(title="Run Estimate")
     table.add_column("Metric", style="bold cyan")
     table.add_column("Value")
-    table.add_row("Items", str(len(items)))
-    table.add_row("Est. Input Tokens", f"{total_tokens:,}")
-    table.add_row("Est. Output Tokens", f"~{est_output:,}")
+    table.add_row("File", input_file)
     table.add_row("Model", model)
-    table.add_row("Est. Cost", format_cost(cost))
+    table.add_row("Rows", f"{est.total_rows:,}")
+    if est.has_checkpoint:
+        table.add_row("Already done", f"[green]{est.completed_rows:,}[/green]")
+        table.add_row("Previously failed", f"{est.failed_rows:,}")
+        table.add_row("Remaining", f"{est.rows_to_process:,}")
+    table.add_row("Est. input tokens", f"~{est.input_tokens:,}")
+    table.add_row("Est. output tokens", f"~{est.output_tokens:,}")
+    table.add_row("Est. cost", format_cost(est.cost))
 
     console.print(table)
+    if est.has_checkpoint and est.rows_to_process == 0:
+        console.print("[green]Nothing left to run: every row is already in the checkpoint.[/green]")
 
 
 @main.command()
