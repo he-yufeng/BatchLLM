@@ -12,6 +12,7 @@ from rich.table import Table
 
 from batchllm.cost import estimate_cost, format_cost
 from batchllm.estimate import estimate_batch
+from batchllm.failures import describe
 from batchllm.processor import BatchConfig, BatchProcessor, BatchResult, BatchStats
 
 console = Console()
@@ -253,6 +254,21 @@ def _print_summary(stats: BatchStats, model: str, output_path: str):
     table.add_row("Avg Latency", f"{stats.avg_latency_ms:.0f}ms")
     table.add_row("Cost", format_cost(cost))
     table.add_row("Output", output_path)
+
+    console.print()
+    console.print(table)
+    _print_failure_breakdown(stats)
+
+
+def _print_failure_breakdown(stats: BatchStats):
+    if not stats.error_breakdown:
+        return
+
+    table = Table(title="Failure Breakdown")
+    table.add_column("Cause", style="bold red")
+    table.add_column("Count", justify="right")
+    for category, count in sorted(stats.error_breakdown.items(), key=lambda kv: -kv[1]):
+        table.add_row(describe(category), str(count))
 
     console.print()
     console.print(table)

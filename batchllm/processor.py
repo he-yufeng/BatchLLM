@@ -8,11 +8,13 @@ import hashlib
 import json
 import logging
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
 from openai import AsyncOpenAI
+
+from batchllm.failures import UNKNOWN, classify_error
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +48,7 @@ class BatchResult:
     input_text: str
     output_text: str | None = None
     error: str | None = None
+    error_type: str | None = None
     tokens_in: int = 0
     tokens_out: int = 0
     latency_ms: float = 0.0
@@ -63,6 +66,7 @@ class BatchStats:
     total_latency_ms: float = 0.0
     start_time: float = 0.0
     end_time: float = 0.0
+    error_breakdown: dict[str, int] = field(default_factory=dict)
 
     @property
     def success_rate(self) -> float:
@@ -176,9 +180,13 @@ class BatchProcessor:
                         await asyncio.sleep(delay)
                     else:
                         result.error = str(exc)
+                        result.error_type = classify_error(exc)
                         result.latency_ms = (time.monotonic() - start) * 1000
                         self.stats.failed += 1
                         self.stats.total_latency_ms += result.latency_ms
+                        self.stats.error_breakdown[result.error_type] = (
+                            self.stats.error_breakdown.get(result.error_type, 0) + 1
+                        )
                         logger.error(
                             "Item %d failed after %d attempts: %s",
                             index,
@@ -236,6 +244,7 @@ class BatchProcessor:
                         input_text=data.get("input", ""),
                         output_text=data.get("output"),
                         error=data.get("error"),
+                        error_type=data.get("error_type"),
                         tokens_in=data.get("tokens_in", 0),
                         tokens_out=data.get("tokens_out", 0),
                         latency_ms=data.get("latency_ms", 0),
@@ -274,6 +283,12 @@ class BatchProcessor:
         self.stats.total_tokens_in = sum(r.tokens_in for r in self._results)
         self.stats.total_tokens_out = sum(r.tokens_out for r in self._results)
         self.stats.total_latency_ms = sum(r.latency_ms for r in self._results)
+        breakdown: dict[str, int] = {}
+        for r in self._results:
+            if r.error is not None:
+                category = r.error_type or UNKNOWN
+                breakdown[category] = breakdown.get(category, 0) + 1
+        self.stats.error_breakdown = breakdown
 
     def _save_checkpoint(self, result: BatchResult) -> None:
         """Append a result to the checkpoint file."""
@@ -293,6 +308,7 @@ class BatchProcessor:
                     "input": result.input_text,
                     "output": result.output_text,
                     "error": result.error,
+                    "error_type": result.error_type,
                     "tokens_in": result.tokens_in,
                     "tokens_out": result.tokens_out,
                     "latency_ms": result.latency_ms,
@@ -444,6 +460,7 @@ class BatchProcessor:
                         self.config.input_column: r.input_text,
                         self.config.output_column: r.output_text,
                         "error": r.error,
+                        "error_type": r.error_type,
                         "tokens_in": r.tokens_in,
                         "tokens_out": r.tokens_out,
                         "latency_ms": round(r.latency_ms, 1),
@@ -457,6 +474,7 @@ class BatchProcessor:
                         self.config.input_column,
                         self.config.output_column,
                         "error",
+                        "error_type",
                         "tokens_in",
                         "tokens_out",
                         "latency_ms",
@@ -469,6 +487,7 @@ class BatchProcessor:
                             self.config.input_column: r.input_text,
                             self.config.output_column: r.output_text or "",
                             "error": r.error or "",
+                            "error_type": r.error_type or "",
                             "tokens_in": r.tokens_in,
                             "tokens_out": r.tokens_out,
                             "latency_ms": round(r.latency_ms, 1),

@@ -27,6 +27,7 @@ BatchLLM packages all of this into a single CLI command and Python API.
 - **Concurrent processing** — configurable parallelism with asyncio semaphore
 - **Automatic retries** — exponential backoff, configurable max retries
 - **Checkpoint/resume** — crash-safe JSONL checkpoints that reject mismatched inputs or model settings
+- **Failure breakdown** — failed rows are tagged by cause (rate limit, auth, timeout, bad request, ...) so the summary tells you what to fix
 - **Cost tracking** — real-time token counting with pricing for 30+ models
 - **Pre-run estimate** — project rows, tokens, and cost offline, including what a checkpoint resume still has left to do
 - **Multiple input formats** — CSV, JSONL, plain text
@@ -163,10 +164,35 @@ Terrible service
 Output mirrors input format with added columns:
 
 ```csv
-input,output,error,tokens_in,tokens_out,latency_ms
-"This movie was great","Positive sentiment","",15,3,234.5
-"Terrible service","Negative sentiment","",12,3,198.2
+input,output,error,error_type,tokens_in,tokens_out,latency_ms
+"This movie was great","Positive sentiment","","",15,3,234.5
+"Terrible service","Negative sentiment","","",12,3,198.2
 ```
+
+For rows that failed after exhausting retries, `error` holds the message and
+`error_type` holds a category (`rate_limit`, `auth`, `timeout`, `connection`,
+`bad_request`, `conflict`, `server`, or `other`), so you can filter the output
+straight to the rows worth re-running.
+
+## When Rows Fail
+
+A run rarely fails all at once for the same reason. When some rows don't make
+it through their retries, the summary groups the failures by cause so you know
+whether to back off, fix a key, or look at the input:
+
+```
+        Failure Breakdown
+┌───────────────────┬───────┐
+│ Cause             │ Count │
+├───────────────────┼───────┤
+│ Rate limit (429)  │    42 │
+│ Timeout           │     6 │
+│ Bad request (4xx) │     1 │
+└───────────────────┴───────┘
+```
+
+The categories survive checkpointing, so a resumed run still reports the
+failures it carried over from the previous attempt.
 
 ## Estimate Before Running
 

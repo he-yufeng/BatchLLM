@@ -331,6 +331,59 @@ async def test_process_items_can_retry_only_failed_checkpoint_rows(config, tmp_p
 
 
 @pytest.mark.asyncio
+async def test_failures_are_classified_and_counted(config):
+    """A failing item records its error category and shows up in the breakdown."""
+    proc = BatchProcessor(config)
+    mock_client = AsyncMock()
+    mock_client.chat.completions.create = AsyncMock(side_effect=TimeoutError("slow"))
+    proc._client = mock_client
+
+    results = await proc.process_items(["will time out"])
+
+    assert results[0].error is not None
+    assert results[0].error_type == "timeout"
+    assert proc.stats.failed == 1
+    assert proc.stats.error_breakdown == {"timeout": 1}
+
+
+@pytest.mark.asyncio
+async def test_error_type_persists_through_checkpoint(config, tmp_path):
+    """error_type written to a checkpoint is restored into the breakdown on resume."""
+    ckpt = tmp_path / "checkpoint.jsonl"
+    proc = BatchProcessor(config)
+    mock_client = AsyncMock()
+    mock_client.chat.completions.create = AsyncMock(side_effect=ConnectionError("refused"))
+    proc._client = mock_client
+
+    await proc.process_items(["boom"], checkpoint_path=ckpt)
+    assert proc.stats.error_breakdown == {"connection": 1}
+
+    # Resume: the failed row is reloaded and its category rebuilt without a new call.
+    resumed = BatchProcessor(config)
+    resumed._client = AsyncMock()
+    await resumed.process_items(["boom"], checkpoint_path=ckpt)
+    assert resumed._client.chat.completions.create.call_count == 0
+    assert resumed.stats.failed == 1
+    assert resumed.stats.error_breakdown == {"connection": 1}
+
+
+def test_restore_marks_legacy_failures_as_unknown(config, tmp_path):
+    """A failed checkpoint row with no error_type counts as 'unknown' on restore."""
+    ckpt = tmp_path / "checkpoint.jsonl"
+    ckpt.write_text(
+        json.dumps({"index": 0, "input": "x", "output": None, "error": "legacy failure"}) + "\n",
+        encoding="utf-8",
+    )
+
+    proc = BatchProcessor(config)
+    proc._load_checkpoint(ckpt)
+    proc._restore_stats_from_results()
+
+    assert proc.stats.failed == 1
+    assert proc.stats.error_breakdown == {"unknown": 1}
+
+
+@pytest.mark.asyncio
 async def test_checkpoint_rejects_changed_input(config, tmp_path):
     ckpt = tmp_path / "checkpoint.jsonl"
     proc = BatchProcessor(config)

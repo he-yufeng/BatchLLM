@@ -27,6 +27,7 @@ BatchLLM 把这些全打包成一个 CLI 命令和 Python API。
 - **并发处理** — 基于 asyncio semaphore 的可配置并行度
 - **自动重试** — 指数退避，可配置最大重试次数
 - **安全断点续传** — JSONL checkpoint 会校验输入和模型配置，避免误续跑到另一批任务
+- **失败归因** — 失败的行按原因分类（限流、鉴权、超时、坏请求……），汇总里直接告诉你该修什么
 - **费用追踪** — 实时 token 计数，内置 30+ 模型定价
 - **运行前预估** — 离线估算行数、token 和费用，断点续传时还会算出还剩多少没跑
 - **多种输入格式** — CSV、JSONL、纯文本
@@ -163,10 +164,32 @@ Terrible service
 输出与输入格式对应，增加了结果列：
 
 ```csv
-input,output,error,tokens_in,tokens_out,latency_ms
-"This movie was great","Positive sentiment","",15,3,234.5
-"Terrible service","Negative sentiment","",12,3,198.2
+input,output,error,error_type,tokens_in,tokens_out,latency_ms
+"This movie was great","Positive sentiment","","",15,3,234.5
+"Terrible service","Negative sentiment","","",12,3,198.2
 ```
+
+重试用尽仍失败的行，`error` 是错误信息，`error_type` 是分类（`rate_limit`、`auth`、
+`timeout`、`connection`、`bad_request`、`conflict`、`server` 或 `other`），方便你直接
+筛出值得重跑的那些行。
+
+## 行处理失败时
+
+一次运行里失败的行往往不是同一个原因。当某些行重试用尽还是没跑通，汇总会按原因分组，
+让你知道是该退避重跑、换个 key，还是回去看输入：
+
+```
+        Failure Breakdown
+┌───────────────────┬───────┐
+│ Cause             │ Count │
+├───────────────────┼───────┤
+│ Rate limit (429)  │    42 │
+│ Timeout           │     6 │
+│ Bad request (4xx) │     1 │
+└───────────────────┴───────┘
+```
+
+这些分类会随 checkpoint 一起保存，所以续跑时仍会带上上一次遗留的失败统计。
 
 ## 运行前预估
 
