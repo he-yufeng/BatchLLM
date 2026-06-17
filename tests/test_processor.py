@@ -73,6 +73,30 @@ class TestBuildMessages:
         msgs = proc._build_messages("hello world")
         assert msgs[0]["content"] == "Translate: hello world"
 
+    def test_template_substitutes_extra_fields(self):
+        config = BatchConfig(prompt_template="Translate to {language}: {input}")
+        proc = BatchProcessor(config)
+        msgs = proc._build_messages("hello", {"input": "hello", "language": "French"})
+        assert msgs[0]["content"] == "Translate to French: hello"
+
+    def test_template_leaves_unknown_placeholder_literal(self):
+        config = BatchConfig(prompt_template="{input} [{missing}]")
+        proc = BatchProcessor(config)
+        msgs = proc._build_messages("hi", {"input": "hi"})
+        assert msgs[0]["content"] == "hi [{missing}]"
+
+    def test_template_does_not_re_expand_substituted_values(self):
+        # an input that contains a brace token must not be expanded again
+        config = BatchConfig(prompt_template="{input} / {label}")
+        proc = BatchProcessor(config)
+        msgs = proc._build_messages("{label}", {"input": "{label}", "label": "x"})
+        assert msgs[0]["content"] == "{label} / x"
+
+    def test_template_without_fields_is_backward_compatible(self):
+        config = BatchConfig(prompt_template="Q: {input}")
+        proc = BatchProcessor(config)
+        assert proc._build_messages("hi")[0]["content"] == "Q: hi"
+
 
 class TestReadInput:
     def test_read_csv(self, processor, tmp_path):
@@ -83,8 +107,13 @@ class TestReadInput:
             writer.writerow({"input": "hello", "label": "greeting"})
             writer.writerow({"input": "bye", "label": "farewell"})
 
-        items = processor._read_input(csv_file)
+        items, fields = processor._read_input(csv_file)
         assert items == ["hello", "bye"]
+        # the full row is preserved so other columns can fill template placeholders
+        assert fields == [
+            {"input": "hello", "label": "greeting"},
+            {"input": "bye", "label": "farewell"},
+        ]
 
     def test_read_jsonl(self, processor, tmp_path):
         jsonl_file = tmp_path / "data.jsonl"
@@ -92,7 +121,7 @@ class TestReadInput:
             f.write(json.dumps({"input": "hello"}) + "\n")
             f.write(json.dumps({"input": "world"}) + "\n")
 
-        items = processor._read_input(jsonl_file)
+        items, _ = processor._read_input(jsonl_file)
         assert items == ["hello", "world"]
 
     def test_read_jsonl_text_fallback(self, processor, tmp_path):
@@ -100,7 +129,7 @@ class TestReadInput:
         with open(jsonl_file, "w") as f:
             f.write(json.dumps({"text": "hello"}) + "\n")
 
-        items = processor._read_input(jsonl_file)
+        items, _ = processor._read_input(jsonl_file)
         assert items == ["hello"]
 
     def test_read_jsonl_missing_input_fails(self, processor, tmp_path):
@@ -115,7 +144,7 @@ class TestReadInput:
         txt_file = tmp_path / "data.txt"
         txt_file.write_text("line one\nline two\n\nline three\n")
 
-        items = processor._read_input(txt_file)
+        items, _ = processor._read_input(txt_file)
         assert items == ["line one", "line two", "line three"]
 
     def test_read_jsonl_strings(self, processor, tmp_path):
@@ -124,7 +153,7 @@ class TestReadInput:
             f.write(json.dumps("hello") + "\n")
             f.write(json.dumps("world") + "\n")
 
-        items = processor._read_input(jsonl_file)
+        items, _ = processor._read_input(jsonl_file)
         assert items == ["hello", "world"]
 
     def test_read_csv_missing_input_column_fails(self, processor, tmp_path):

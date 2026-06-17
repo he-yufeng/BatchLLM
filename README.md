@@ -32,7 +32,7 @@ BatchLLM packages all of this into a single CLI command and Python API.
 - **Pre-run estimate** — project rows, tokens, and cost offline, including what a checkpoint resume still has left to do
 - **Multiple input formats** — CSV, JSONL, plain text
 - **Any OpenAI-compatible API** — OpenAI, Anthropic (via proxy), DeepSeek, local models, etc.
-- **Prompt templates** — customize prompts with `{input}` placeholder
+- **Prompt templates** — `{input}` plus any other CSV column / JSONL field as `{column}`, e.g. `"Translate {text} to {language}"`
 - **Rich progress bar** — live progress with throughput and ETA
 
 ## Installation
@@ -146,6 +146,18 @@ input,category
 ```
 
 BatchLLM fails fast if the configured CSV column or JSONL field is missing. That is intentional: a batch job should not silently turn bad input into thousands of empty prompts.
+
+### Multi-field templates
+
+Every other column (CSV) or field (JSONL) is available to the prompt template as `{column}`, alongside `{input}`. So a `reviews.csv` with `text,language` columns can drive:
+
+```bash
+batchllm run reviews.csv -m gpt-4o-mini \
+  --input-column text \
+  -t "Translate this review to {language}, then summarize it in one line: {text}"
+```
+
+Unknown placeholders are left untouched (literal braces in a template won't break the run), and substitution is single-pass so a value that itself contains `{...}` is never re-expanded.
 
 You can check the input without calling a model:
 

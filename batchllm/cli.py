@@ -172,7 +172,7 @@ def estimate(
     )
     processor = BatchProcessor(config)
     try:
-        rows = processor._read_input(Path(input_file))
+        rows, _ = processor._read_input(Path(input_file))
         est = estimate_batch(
             config,
             rows,
@@ -214,7 +214,7 @@ def validate(input_file: str, input_column: str, min_items: int):
     config = BatchConfig(input_column=input_column)
     processor = BatchProcessor(config)
     try:
-        items = processor._read_input(Path(input_file))
+        items, _ = processor._read_input(Path(input_file))
     except Exception as exc:
         raise click.ClickException(str(exc)) from exc
 

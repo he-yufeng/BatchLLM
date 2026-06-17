@@ -7,6 +7,7 @@ import csv
 import hashlib
 import json
 import logging
+import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -17,6 +18,24 @@ from openai import AsyncOpenAI
 from batchllm.failures import UNKNOWN, classify_error
 
 logger = logging.getLogger(__name__)
+
+# Matches {placeholder} tokens in a prompt template.
+_PLACEHOLDER = re.compile(r"\{(\w+)\}")
+
+
+def _render_template(template: str, input_text: str, fields: dict[str, Any] | None) -> str:
+    """Fill ``{input}`` and any ``{column}``/``{field}`` placeholders in one pass.
+
+    ``{input}`` always resolves to the input text. Other tokens resolve to the
+    matching CSV column / JSONL field (when present); unknown tokens are left
+    verbatim so literal braces in a template don't break the run. Single-pass
+    substitution means a value that happens to contain ``{...}`` is never
+    re-expanded.
+    """
+    values: dict[str, str] = {"input": input_text}
+    for key, value in (fields or {}).items():
+        values.setdefault(key, "" if value is None else str(value))
+    return _PLACEHOLDER.sub(lambda m: values.get(m.group(1), m.group(0)), template)
 
 
 @dataclass
@@ -116,20 +135,24 @@ class BatchProcessor:
             self._client = AsyncOpenAI(**kwargs)
         return self._client
 
-    def _build_messages(self, input_text: str) -> list[dict[str, str]]:
+    def _build_messages(
+        self, input_text: str, fields: dict[str, Any] | None = None
+    ) -> list[dict[str, str]]:
         messages: list[dict[str, str]] = []
         if self.config.system_prompt:
             messages.append({"role": "system", "content": self.config.system_prompt})
-        prompt = self.config.prompt_template.replace("{input}", input_text)
+        prompt = _render_template(self.config.prompt_template, input_text, fields)
         messages.append({"role": "user", "content": prompt})
         return messages
 
-    async def _process_one(self, index: int, input_text: str) -> BatchResult:
+    async def _process_one(
+        self, index: int, input_text: str, fields: dict[str, Any] | None = None
+    ) -> BatchResult:
         """Process a single item with retries."""
         assert self._semaphore is not None
         async with self._semaphore:
             result = BatchResult(index=index, input_text=input_text)
-            messages = self._build_messages(input_text)
+            messages = self._build_messages(input_text, fields)
 
             for attempt in range(self.config.max_retries + 1):
                 start = time.monotonic()
@@ -323,6 +346,7 @@ class BatchProcessor:
         on_progress: Callable[[BatchResult, BatchStats], None] | None = None,
         checkpoint_path: str | Path | None = None,
         retry_failed: bool = False,
+        fields: list[dict[str, Any]] | None = None,
     ) -> list[BatchResult]:
         """Process a list of input strings through the LLM.
 
@@ -331,6 +355,8 @@ class BatchProcessor:
             on_progress: Callback for each completed item.
             checkpoint_path: Path for checkpoint file (enables resume).
             retry_failed: Reprocess failed rows while reusing successful rows.
+            fields: Optional per-item field maps (CSV columns / JSONL fields)
+                exposed to the prompt template as ``{column}`` placeholders.
 
         Returns:
             List of BatchResult objects.
@@ -358,7 +384,8 @@ class BatchProcessor:
         for i, text in enumerate(items):
             if i in self._completed_indices:
                 continue
-            tasks.append(self._process_one(i, text))
+            item_fields = fields[i] if fields is not None and i < len(fields) else None
+            tasks.append(self._process_one(i, text, item_fields))
 
         # run all tasks concurrently (semaphore controls parallelism)
         for coro in asyncio.as_completed(tasks):
@@ -395,9 +422,11 @@ class BatchProcessor:
             List of results.
         """
         input_path = Path(input_path)
-        items = self._read_input(input_path)
+        items, fields = self._read_input(input_path)
 
-        results = await self.process_items(items, on_progress, checkpoint_path, retry_failed)
+        results = await self.process_items(
+            items, on_progress, checkpoint_path, retry_failed, fields=fields
+        )
 
         if output_path is None:
             suffix = input_path.suffix
@@ -406,10 +435,16 @@ class BatchProcessor:
         self._write_output(Path(output_path), results, input_path)
         return results
 
-    def _read_input(self, path: Path) -> list[str]:
-        """Read input texts from CSV or JSONL."""
+    def _read_input(self, path: Path) -> tuple[list[str], list[dict[str, Any]]]:
+        """Read input texts from CSV or JSONL.
+
+        Returns the input strings and a parallel list of field maps (the full
+        CSV row / JSONL object) so other columns are available to the prompt
+        template as ``{column}`` placeholders. Plain-text inputs have no fields.
+        """
         suffix = path.suffix.lower()
-        items = []
+        items: list[str] = []
+        fields: list[dict[str, Any]] = []
 
         if suffix == ".jsonl":
             with open(path, encoding="utf-8") as f:
@@ -420,10 +455,13 @@ class BatchProcessor:
                     data = json.loads(line)
                     if isinstance(data, str):
                         items.append(data)
+                        fields.append({})
                     elif isinstance(data, dict):
                         items.append(self._read_mapping_input(data, path=path))
+                        fields.append(data)
                     else:
                         items.append(str(data))
+                        fields.append({})
         elif suffix == ".csv":
             with open(path, encoding="utf-8", newline="") as f:
                 reader = csv.DictReader(f)
@@ -435,12 +473,14 @@ class BatchProcessor:
                     )
                 for row in reader:
                     items.append(str(row[self.config.input_column]))
+                    fields.append(dict(row))
         else:
             # plain text, one item per line
             with open(path, encoding="utf-8") as f:
                 items = [line.rstrip("\n") for line in f if line.strip()]
+            fields = [{} for _ in items]
 
-        return items
+        return items, fields
 
     def _read_mapping_input(self, data: dict[str, Any], path: Path) -> str:
         if self.config.input_column in data:
