@@ -57,6 +57,7 @@ class BatchConfig:
     checkpoint_every: int = 50
     input_column: str = "input"
     output_column: str = "output"
+    limit: int | None = None
 
 
 @dataclass
@@ -419,10 +420,16 @@ class BatchProcessor:
             retry_failed: Reprocess failed checkpoint rows.
 
         Returns:
-            List of results.
+            List of results. If ``config.limit`` is set, only the first
+            ``limit`` rows of the file are processed (a cheap smoke test
+            before committing to the full job).
         """
         input_path = Path(input_path)
         items, fields = self._read_input(input_path)
+
+        if self.config.limit is not None:
+            items = items[: self.config.limit]
+            fields = fields[: self.config.limit]
 
         results = await self.process_items(
             items, on_progress, checkpoint_path, retry_failed, fields=fields

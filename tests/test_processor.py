@@ -251,6 +251,57 @@ async def test_process_items_mock(config):
     assert proc.stats.total_tokens_out == 40
 
 
+def _csv_with_rows(path, n):
+    with open(path, "w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=["input"])
+        writer.writeheader()
+        for i in range(n):
+            writer.writerow({"input": f"row{i}"})
+    return path
+
+
+def test_config_limit_defaults_to_none():
+    assert BatchConfig().limit is None
+
+
+@pytest.mark.asyncio
+async def test_process_file_limit_processes_only_first_n_rows(tmp_path):
+    src = _csv_with_rows(tmp_path / "data.csv", 5)
+    proc = BatchProcessor(BatchConfig(model="gpt-4o-mini", limit=2))
+    proc._client = AsyncMock()
+    proc._client.chat.completions.create = AsyncMock(return_value=_mock_response("ok"))
+
+    out = tmp_path / "out.csv"
+    results = await proc.process_file(src, output_path=out)
+
+    # only the first 2 of 5 rows ran — a cheap smoke test before the full job
+    assert [r.input_text for r in results] == ["row0", "row1"]
+    with open(out, encoding="utf-8", newline="") as f:
+        assert len(list(csv.DictReader(f))) == 2
+
+
+@pytest.mark.asyncio
+async def test_process_file_without_limit_processes_all_rows(tmp_path):
+    src = _csv_with_rows(tmp_path / "data.csv", 3)
+    proc = BatchProcessor(BatchConfig(model="gpt-4o-mini"))
+    proc._client = AsyncMock()
+    proc._client.chat.completions.create = AsyncMock(return_value=_mock_response("ok"))
+
+    results = await proc.process_file(src, output_path=tmp_path / "out.csv")
+    assert len(results) == 3
+
+
+@pytest.mark.asyncio
+async def test_process_file_limit_above_row_count_processes_all(tmp_path):
+    src = _csv_with_rows(tmp_path / "data.csv", 2)
+    proc = BatchProcessor(BatchConfig(model="gpt-4o-mini", limit=10))
+    proc._client = AsyncMock()
+    proc._client.chat.completions.create = AsyncMock(return_value=_mock_response("ok"))
+
+    results = await proc.process_file(src, output_path=tmp_path / "out.csv")
+    assert len(results) == 2
+
+
 @pytest.mark.asyncio
 async def test_process_items_restores_checkpoint_stats(config, tmp_path):
     ckpt = tmp_path / "checkpoint.jsonl"

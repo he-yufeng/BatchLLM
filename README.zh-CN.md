@@ -30,6 +30,7 @@ BatchLLM 把这些全打包成一个 CLI 命令和 Python API。
 - **失败归因** — 失败的行按原因分类（限流、鉴权、超时、坏请求……），汇总里直接告诉你该修什么
 - **费用追踪** — 实时 token 计数，内置 30+ 模型定价
 - **运行前预估** — 离线估算行数、token 和费用，断点续传时还会算出还剩多少没跑
+- **`--limit N` 试跑** — 只处理前 N 行，跑完整任务前先验一下 prompt 对不对
 - **多种输入格式** — CSV、JSONL、纯文本
 - **兼容任何 OpenAI API** — OpenAI、DeepSeek、本地模型等
 - **Prompt 模板** — 用 `{input}` 占位符自定义 prompt
@@ -65,6 +66,9 @@ batchllm run data.csv -m gpt-4o-mini --checkpoint data.ckpt --retry-failed
 
 # 已恢复的行仍会计入最终 token、延迟和费用汇总
 # 如果换了输入、模型、prompt 或采样配置，复用旧 checkpoint 会直接报错
+
+# 跑完整任务前，先用前 5 行 smoke test 验一下 prompt
+batchllm run data.csv -m gpt-4o-mini -t "Summarize: {input}" --limit 5
 
 # 花钱调用 API 前先验证输入格式和样本数量
 batchllm validate data.csv --min-items 100

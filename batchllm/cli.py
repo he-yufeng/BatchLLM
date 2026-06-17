@@ -57,6 +57,12 @@ def main():
 )
 @click.option("--input-column", default="input", help="Column name for input text.")
 @click.option("--output-column", default="output", help="Column name for output text.")
+@click.option(
+    "-n",
+    "--limit",
+    type=int,
+    help="Process only the first N rows (smoke-test a prompt before the full run).",
+)
 def run(
     input_file: str,
     output: str | None,
@@ -73,10 +79,13 @@ def run(
     retry_failed: bool,
     input_column: str,
     output_column: str,
+    limit: int | None,
 ):
     """Process an input file (CSV/JSONL/TXT) through an LLM."""
     if retry_failed and not checkpoint:
         raise click.UsageError("--retry-failed requires --checkpoint")
+    if limit is not None and limit <= 0:
+        raise click.UsageError("--limit must be greater than zero")
 
     config = BatchConfig(
         model=model,
@@ -90,6 +99,7 @@ def run(
         base_url=base_url,
         input_column=input_column,
         output_column=output_column,
+        limit=limit,
     )
 
     processor = BatchProcessor(config)
@@ -103,6 +113,8 @@ def run(
     console.print(f"[bold]Model:[/bold] {model}")
     console.print(f"[bold]Input:[/bold] {input_file}")
     console.print(f"[bold]Concurrency:[/bold] {concurrent}")
+    if limit is not None:
+        console.print(f"[bold]Limit:[/bold] first {limit} row(s)")
     if checkpoint:
         console.print(f"[bold]Checkpoint:[/bold] {checkpoint}")
     console.print()
