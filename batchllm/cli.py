@@ -63,6 +63,12 @@ def main():
     type=int,
     help="Process only the first N rows (smoke-test a prompt before the full run).",
 )
+@click.option(
+    "--max-cost",
+    type=float,
+    help="Stop the run once the spend reaches this many USD (needs a known model; "
+    "use --checkpoint to resume the remaining rows).",
+)
 def run(
     input_file: str,
     output: str | None,
@@ -80,12 +86,15 @@ def run(
     input_column: str,
     output_column: str,
     limit: int | None,
+    max_cost: float | None,
 ):
     """Process an input file (CSV/JSONL/TXT) through an LLM."""
     if retry_failed and not checkpoint:
         raise click.UsageError("--retry-failed requires --checkpoint")
     if limit is not None and limit <= 0:
         raise click.UsageError("--limit must be greater than zero")
+    if max_cost is not None and max_cost <= 0:
+        raise click.UsageError("--max-cost must be greater than zero")
 
     config = BatchConfig(
         model=model,
@@ -100,6 +109,7 @@ def run(
         input_column=input_column,
         output_column=output_column,
         limit=limit,
+        max_cost=max_cost,
     )
 
     processor = BatchProcessor(config)
@@ -115,6 +125,8 @@ def run(
     console.print(f"[bold]Concurrency:[/bold] {concurrent}")
     if limit is not None:
         console.print(f"[bold]Limit:[/bold] first {limit} row(s)")
+    if max_cost is not None:
+        console.print(f"[bold]Cost ceiling:[/bold] {format_cost(max_cost)}")
     if checkpoint:
         console.print(f"[bold]Checkpoint:[/bold] {checkpoint}")
     console.print()
@@ -265,10 +277,17 @@ def _print_summary(stats: BatchStats, model: str, output_path: str):
     table.add_row("Throughput", f"{stats.items_per_second:.1f} items/s")
     table.add_row("Avg Latency", f"{stats.avg_latency_ms:.0f}ms")
     table.add_row("Cost", format_cost(cost))
+    if stats.stopped_early:
+        table.add_row("Stopped early", "[yellow]cost ceiling reached[/yellow]")
     table.add_row("Output", output_path)
 
     console.print()
     console.print(table)
+    if stats.stopped_early:
+        console.print(
+            "[yellow]Run stopped at the cost ceiling; "
+            "rerun with --checkpoint to finish the remaining rows.[/yellow]"
+        )
     _print_failure_breakdown(stats)
 
 

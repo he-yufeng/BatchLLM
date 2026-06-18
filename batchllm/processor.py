@@ -15,6 +15,7 @@ from typing import Any, Callable
 
 from openai import AsyncOpenAI
 
+from batchllm.cost import estimate_cost
 from batchllm.failures import UNKNOWN, classify_error
 
 logger = logging.getLogger(__name__)
@@ -58,6 +59,7 @@ class BatchConfig:
     input_column: str = "input"
     output_column: str = "output"
     limit: int | None = None
+    max_cost: float | None = None
 
 
 @dataclass
@@ -87,6 +89,7 @@ class BatchStats:
     start_time: float = 0.0
     end_time: float = 0.0
     error_breakdown: dict[str, int] = field(default_factory=dict)
+    stopped_early: bool = False
 
     @property
     def success_rate(self) -> float:
@@ -341,6 +344,22 @@ class BatchProcessor:
         except Exception as exc:
             logger.warning("Failed to save checkpoint: %s", exc)
 
+    def _cost_ceiling_reached(self) -> bool:
+        """True when a ``max_cost`` budget is set and the spend so far has hit it.
+
+        Cost is estimated from the tokens billed so far. Unknown model pricing
+        yields no estimate, so the ceiling cannot be enforced and the run
+        proceeds (the pre-run estimate already flags unpriced models).
+        """
+        if self.config.max_cost is None:
+            return False
+        spent = estimate_cost(
+            self.config.model,
+            self.stats.total_tokens_in,
+            self.stats.total_tokens_out,
+        )
+        return spent is not None and spent >= self.config.max_cost
+
     async def process_items(
         self,
         items: list[str],
@@ -386,15 +405,29 @@ class BatchProcessor:
             if i in self._completed_indices:
                 continue
             item_fields = fields[i] if fields is not None and i < len(fields) else None
-            tasks.append(self._process_one(i, text, item_fields))
+            tasks.append(asyncio.ensure_future(self._process_one(i, text, item_fields)))
 
         # run all tasks concurrently (semaphore controls parallelism)
-        for coro in asyncio.as_completed(tasks):
-            result = await coro
-            self._results.append(result)
-            self._save_checkpoint(result)
-            if on_progress:
-                on_progress(result, self.stats)
+        try:
+            for coro in asyncio.as_completed(tasks):
+                result = await coro
+                self._results.append(result)
+                self._save_checkpoint(result)
+                if on_progress:
+                    on_progress(result, self.stats)
+                if self._cost_ceiling_reached():
+                    self.stats.stopped_early = True
+                    break
+        finally:
+            # if we stopped early (or errored), cancel the still-pending tasks
+            # so they don't run on after the budget is spent. Results already
+            # collected are saved to the checkpoint, so a resume picks up the
+            # untouched rows.
+            pending = [t for t in tasks if not t.done()]
+            for task in pending:
+                task.cancel()
+            if pending:
+                await asyncio.gather(*pending, return_exceptions=True)
 
         self.stats.end_time = time.time()
 

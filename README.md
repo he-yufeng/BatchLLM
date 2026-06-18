@@ -31,6 +31,7 @@ BatchLLM packages all of this into a single CLI command and Python API.
 - **Cost tracking** — real-time token counting with pricing for 30+ models
 - **Pre-run estimate** — project rows, tokens, and cost offline, including what a checkpoint resume still has left to do
 - **Smoke test with `--limit N`** — process just the first N rows to sanity-check a prompt before committing to the full job
+- **Cost ceiling with `--max-cost`** — stop the run once the spend reaches a USD budget; pair it with `--checkpoint` to resume the rest later
 - **Multiple input formats** — CSV, JSONL, plain text
 - **Any OpenAI-compatible API** — OpenAI, Anthropic (via proxy), DeepSeek, local models, etc.
 - **Prompt templates** — `{input}` plus any other CSV column / JSONL field as `{column}`, e.g. `"Translate {text} to {language}"`
@@ -69,6 +70,9 @@ batchllm run data.csv -m gpt-4o-mini --checkpoint data.ckpt --retry-failed
 
 # Smoke-test a prompt on the first 5 rows before the full run
 batchllm run data.csv -m gpt-4o-mini -t "Summarize: {input}" --limit 5
+
+# Stop once the run has spent $5, then resume the rest later from the checkpoint
+batchllm run data.csv -m gpt-4o-mini --max-cost 5 --checkpoint data.ckpt
 
 # Validate input format before spending money on API calls
 batchllm validate data.csv --min-items 100

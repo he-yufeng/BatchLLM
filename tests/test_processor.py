@@ -302,6 +302,50 @@ async def test_process_file_limit_above_row_count_processes_all(tmp_path):
     assert len(results) == 2
 
 
+def test_config_max_cost_defaults_to_none():
+    assert BatchConfig().max_cost is None
+
+
+@pytest.mark.asyncio
+async def test_max_cost_stops_run_early_then_checkpoint_resumes(tmp_path):
+    # gpt-4o-mini input is $0.15 / 1M tokens, so each mocked row (1M prompt
+    # tokens) costs $0.15; a $0.20 ceiling is crossed after the second row.
+    src = _csv_with_rows(tmp_path / "data.csv", 5)
+    ckpt = tmp_path / "data.ckpt"
+    pricey = _mock_response("ok", prompt_tokens=1_000_000, completion_tokens=0)
+
+    proc = BatchProcessor(BatchConfig(model="gpt-4o-mini", max_concurrent=1, max_cost=0.20))
+    proc._client = AsyncMock()
+    proc._client.chat.completions.create = AsyncMock(return_value=pricey)
+    first = await proc.process_file(src, output_path=tmp_path / "out1.csv", checkpoint_path=ckpt)
+
+    assert proc.stats.stopped_early is True
+    done = [r for r in first if r.error is None]
+    assert 1 <= len(done) < 5  # stopped before the whole file ran
+
+    # resuming without a ceiling finishes the untouched rows from the checkpoint
+    proc2 = BatchProcessor(BatchConfig(model="gpt-4o-mini", max_concurrent=1))
+    proc2._client = AsyncMock()
+    proc2._client.chat.completions.create = AsyncMock(return_value=_mock_response("ok"))
+    second = await proc2.process_file(src, output_path=tmp_path / "out2.csv", checkpoint_path=ckpt)
+
+    assert proc2.stats.stopped_early is False
+    assert len(second) == 5
+    assert all(r.error is None for r in second)
+
+
+@pytest.mark.asyncio
+async def test_max_cost_not_reached_processes_all(tmp_path):
+    src = _csv_with_rows(tmp_path / "data.csv", 3)
+    proc = BatchProcessor(BatchConfig(model="gpt-4o-mini", max_cost=1000.0))
+    proc._client = AsyncMock()
+    proc._client.chat.completions.create = AsyncMock(return_value=_mock_response("ok"))
+
+    results = await proc.process_file(src, output_path=tmp_path / "out.csv")
+    assert len(results) == 3
+    assert proc.stats.stopped_early is False
+
+
 @pytest.mark.asyncio
 async def test_process_items_restores_checkpoint_stats(config, tmp_path):
     ckpt = tmp_path / "checkpoint.jsonl"
