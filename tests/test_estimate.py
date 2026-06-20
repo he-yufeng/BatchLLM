@@ -52,6 +52,19 @@ def test_template_and_system_add_input_tokens():
     assert with_system.input_tokens > base.input_tokens
 
 
+def test_field_placeholders_sized_from_values_not_literal():
+    # A template with a {column} placeholder must size the estimate from the
+    # field's value, not from the literal "{document}" text — otherwise a large
+    # field is wildly under-estimated.
+    config = BatchConfig(model="gpt-4o-mini", prompt_template="Summarize {document}")
+    big = "word " * 800  # ~4000 chars -> ~1000 tokens once expanded
+
+    with_fields = estimate_batch(config, ["row"], fields=[{"document": big}])
+    without_fields = estimate_batch(config, ["row"])  # placeholder stays literal
+
+    assert with_fields.input_tokens > without_fields.input_tokens + 500
+
+
 def test_output_ratio_scales_output():
     config = BatchConfig(model="gpt-4o-mini")
     zero = estimate_batch(config, ["hello world"], output_ratio=0.0)

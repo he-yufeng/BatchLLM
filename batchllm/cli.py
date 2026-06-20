@@ -196,13 +196,14 @@ def estimate(
     )
     processor = BatchProcessor(config)
     try:
-        rows, _ = processor._read_input(Path(input_file))
+        rows, item_fields = processor._read_input(Path(input_file))
         est = estimate_batch(
             config,
             rows,
             output_ratio=output_ratio,
             checkpoint_path=checkpoint,
             retry_failed=retry_failed,
+            fields=item_fields,
         )
     except Exception as exc:
         raise click.ClickException(str(exc)) from exc

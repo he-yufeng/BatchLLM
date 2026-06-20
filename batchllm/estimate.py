@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from batchllm.cost import estimate_cost
-from batchllm.processor import BatchConfig, BatchProcessor
+from batchllm.processor import BatchConfig, BatchProcessor, _render_template
 
 # Transparent heuristic. English text runs ~4 characters per token under the
 # cl100k_base/o200k_base vocabularies, and the chat format spends a few extra
@@ -40,8 +41,17 @@ def estimate_tokens(text: str) -> int:
     return (len(text) + CHARS_PER_TOKEN - 1) // CHARS_PER_TOKEN
 
 
-def _row_tokens(config: BatchConfig, row: str, output_ratio: float) -> tuple[int, int]:
-    content = estimate_tokens(config.prompt_template.replace("{input}", row))
+def _row_tokens(
+    config: BatchConfig,
+    row: str,
+    output_ratio: float,
+    row_fields: dict[str, Any] | None = None,
+) -> tuple[int, int]:
+    # Render exactly like a real run does, so {column}/{field} placeholders are
+    # filled with their values rather than counted as their literal token text —
+    # otherwise a template like "{document}" sizes the estimate from the
+    # placeholder, not the (possibly large) field it expands to.
+    content = estimate_tokens(_render_template(config.prompt_template, row, row_fields))
     input_tokens = content + TOKENS_PER_MESSAGE + REPLY_PRIMING_TOKENS
     if config.system_prompt:
         input_tokens += estimate_tokens(config.system_prompt) + TOKENS_PER_MESSAGE
@@ -84,6 +94,7 @@ def estimate_batch(
     output_ratio: float = 1.0,
     checkpoint_path: str | Path | None = None,
     retry_failed: bool = False,
+    fields: list[dict[str, Any]] | None = None,
 ) -> BatchEstimate:
     """Estimate the work left in a batch run.
 
@@ -108,7 +119,8 @@ def estimate_batch(
 
     input_tokens = output_tokens = 0
     for i in pending:
-        row_in, row_out = _row_tokens(config, rows[i], output_ratio)
+        row_fields = fields[i] if fields is not None and i < len(fields) else None
+        row_in, row_out = _row_tokens(config, rows[i], output_ratio, row_fields)
         input_tokens += row_in
         output_tokens += row_out
 
