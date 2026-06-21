@@ -477,7 +477,7 @@ class BatchProcessor:
             suffix = input_path.suffix
             output_path = input_path.with_suffix(f".out{suffix}")
 
-        self._write_output(Path(output_path), results, input_path)
+        self._write_output(Path(output_path), results)
         return results
 
     def _read_input(self, path: Path) -> tuple[list[str], list[dict[str, Any]]]:
@@ -534,11 +534,11 @@ class BatchProcessor:
             return str(data["text"])
         raise ValueError(f"{path}: JSONL object is missing {self.config.input_column!r}")
 
-    def _write_output(self, path: Path, results: list[BatchResult], input_path: Path) -> None:
-        """Write results to CSV or JSONL."""
+    def _write_output(self, path: Path, results: list[BatchResult]) -> None:
+        """Write results to CSV or JSONL, based on the output file's suffix."""
         suffix = path.suffix.lower()
 
-        if suffix == ".jsonl" or input_path.suffix.lower() == ".jsonl":
+        if suffix == ".jsonl":
             with open(path, "w", encoding="utf-8") as f:
                 for r in results:
                     data = {

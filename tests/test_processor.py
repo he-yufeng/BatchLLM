@@ -186,7 +186,7 @@ class TestWriteOutput:
             ),
         ]
         out = tmp_path / "out.csv"
-        processor._write_output(out, results, tmp_path / "in.csv")
+        processor._write_output(out, results)
 
         with open(out, newline="") as f:
             reader = csv.DictReader(f)
@@ -200,7 +200,7 @@ class TestWriteOutput:
             BatchResult(index=0, input_text="hi", output_text="hello", tokens_in=5, tokens_out=5),
         ]
         out = tmp_path / "out.jsonl"
-        processor._write_output(out, results, tmp_path / "in.jsonl")
+        processor._write_output(out, results)
 
         with open(out) as f:
             data = json.loads(f.readline())
@@ -567,3 +567,21 @@ async def test_empty_choices_is_a_failure_not_an_empty_success(config):
     assert results[0].error is not None
     assert proc.stats.failed == 1
     assert proc.stats.completed == 0
+
+
+@pytest.mark.asyncio
+async def test_output_format_follows_output_path_not_input_path(tmp_path):
+    # A .jsonl input with an explicit .csv output must produce CSV, not JSONL.
+    src = tmp_path / "in.jsonl"
+    src.write_text('{"input": "hello"}\n', encoding="utf-8")
+    proc = BatchProcessor(BatchConfig(model="gpt-4o-mini"))
+    proc._client = AsyncMock()
+    proc._client.chat.completions.create = AsyncMock(return_value=_mock_response("hi"))
+    out = tmp_path / "out.csv"
+
+    await proc.process_file(src, output_path=out)
+
+    first_line = out.read_text(encoding="utf-8").splitlines()[0]
+    # a CSV header row, not a per-line JSON object
+    assert not first_line.startswith("{")
+    assert "," in first_line
