@@ -548,3 +548,22 @@ async def test_process_items_does_not_reuse_previous_checkpoint_path(config, tmp
     await proc.process_items(["second"])
 
     assert ckpt.read_text(encoding="utf-8") == original
+
+
+@pytest.mark.asyncio
+async def test_empty_choices_is_a_failure_not_an_empty_success(config):
+    # An API response with no choices must be recorded as a failure, not as a
+    # completed item with empty output.
+    proc = BatchProcessor(config)
+    empty = MagicMock()
+    empty.choices = []
+    proc._client = AsyncMock()
+    proc._client.chat.completions.create = AsyncMock(return_value=empty)
+
+    results = await proc.process_items(["hi"])
+
+    assert len(results) == 1
+    assert results[0].output_text is None
+    assert results[0].error is not None
+    assert proc.stats.failed == 1
+    assert proc.stats.completed == 0

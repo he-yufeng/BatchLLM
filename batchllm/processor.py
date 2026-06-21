@@ -177,8 +177,13 @@ class BatchProcessor:
                     elapsed = (time.monotonic() - start) * 1000
                     result.latency_ms = elapsed
 
-                    choice = response.choices[0] if response.choices else None
-                    result.output_text = choice.message.content if choice else None
+                    if not response.choices:
+                        # No choices is an API failure, not a successful empty
+                        # completion — route it through the same retry/error
+                        # path as any other failure instead of recording a
+                        # "completed" item with no output.
+                        raise ValueError("API response contained no choices")
+                    result.output_text = response.choices[0].message.content
 
                     usage = response.usage
                     if usage:
