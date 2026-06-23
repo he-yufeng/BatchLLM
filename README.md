@@ -1,11 +1,16 @@
-[![中文版](https://img.shields.io/badge/lang-中文-red)](README.zh-CN.md)
+<div align="center">
+
+<img src="docs/banner.png" alt="BatchLLM — batch-process LLM APIs" width="100%">
+
 [![PyPI version](https://img.shields.io/pypi/v/batchllm)](https://pypi.org/project/batchllm/)
 [![CI](https://github.com/he-yufeng/BatchLLM/actions/workflows/ci.yml/badge.svg)](https://github.com/he-yufeng/BatchLLM/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-# BatchLLM
+[**Quick Start**](#quick-start) · [**Usage**](#usage) · [**Features**](#features) · [中文](README.zh-CN.md)
 
-**Batch processing for LLM APIs. CSV in, processed CSV out.**
+</div>
+
+<p align="center"><img src="docs/demo.png" alt="batchllm run" width="620"></p>
 
 Feed BatchLLM a file of inputs, it fires them through any OpenAI-compatible API with concurrent requests, automatic retries, rate limiting, checkpointing, and cost tracking. Get a clean output file with results, token counts, and latency stats.
 
