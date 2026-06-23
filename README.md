@@ -298,6 +298,11 @@ pip install -e ".[dev]"
 pytest
 ```
 
+## Related projects
+
+- [TokenTracker](https://github.com/he-yufeng/TokenTracker) — a drop-in LLM cost tracker
+- [PromptDiff](https://github.com/he-yufeng/PromptDiff) — semantic diff for LLM prompts
+
 ## License
 
 MIT
