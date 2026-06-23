@@ -294,6 +294,15 @@ Custom pricing can be passed via the Python API.
 | api_key | `--api-key` | env `OPENAI_API_KEY` | API key |
 | base_url | `--base-url` | env `OPENAI_BASE_URL` | API base URL |
 
+## Roadmap
+
+Concurrency, checkpoint/resume, retries, and cost control are solid. The next steps are about what a batch can carry and where it can live:
+
+- **Structured output mode** — validate each row's response against a JSON schema and write a structured column, so a batch can feed straight into the next step instead of being re-parsed.
+- **More input/output formats** — read and write Parquet and JSON arrays alongside CSV/JSONL, for batches that live in a data pipeline rather than a flat file.
+- **Per-row model routing** — let a column choose the model per row, so one run can send the hard rows to a stronger model and the rest to a cheaper one.
+- **A live progress view** — a compact view of throughput, spend, and failure rate while a long run is in flight, not just the summary at the end.
+
 ## Contributing
 
 ```bash
