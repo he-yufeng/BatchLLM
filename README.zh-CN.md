@@ -1,9 +1,16 @@
-[![English](https://img.shields.io/badge/lang-English-blue)](README.md)
+<div align="center">
+
+<img src="docs/banner.png" alt="BatchLLM — LLM API 批量处理工具" width="100%">
+
 [![PyPI version](https://img.shields.io/pypi/v/batchllm)](https://pypi.org/project/batchllm/)
 [![CI](https://github.com/he-yufeng/BatchLLM/actions/workflows/ci.yml/badge.svg)](https://github.com/he-yufeng/BatchLLM/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-# BatchLLM
+[**快速上手**](#快速上手) · [**用法**](#用法) · [English](README.md)
+
+</div>
+
+<p align="center"><img src="docs/demo.png" alt="batchllm run" width="620"></p>
 
 **LLM API 批量处理工具。CSV 进，处理完的 CSV 出。**
 
