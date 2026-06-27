@@ -296,6 +296,14 @@ pip install -e ".[dev]"
 pytest
 ```
 
+## 相关项目
+
+BatchLLM 是我做的 LLM-ops 工具之一，下面几个跟它搭着用很顺：
+
+- **[CoreCoder](https://github.com/he-yufeng/CoreCoder)** — 想搞懂一个 coding agent 到底怎么运作？把整套约 1000 行引擎从头读到尾，而不是当黑箱。
+- **[RepoWiki](https://github.com/he-yufeng/RepoWiki)** — 被丢进一个陌生代码库？它给你一份带「从哪读起」路径的 wiki，一个可自托管的 DeepWiki 替代。
+- **[TokenTracker](https://github.com/he-yufeng/TokenTracker)** — 再也不被 LLM 账单吓一跳：一行代码记下每个 token 和每一块钱。
+
 ## 许可证
 
 MIT

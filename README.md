@@ -312,10 +312,13 @@ pip install -e ".[dev]"
 pytest
 ```
 
-## Related projects
+## Related Projects
 
-- [TokenTracker](https://github.com/he-yufeng/TokenTracker) — a drop-in LLM cost tracker
-- [PromptDiff](https://github.com/he-yufeng/PromptDiff) — semantic diff for LLM prompts
+BatchLLM is one of my LLM-ops tools. A few others that pair well with it:
+
+- **[CoreCoder](https://github.com/he-yufeng/CoreCoder)** — want to understand how a coding agent really works? Read the whole ~1k-line engine end to end, not a black box.
+- **[RepoWiki](https://github.com/he-yufeng/RepoWiki)** — dropped into an unfamiliar codebase? It gives you a guided wiki and a where-to-start reading path, a self-hostable DeepWiki alternative.
+- **[TokenTracker](https://github.com/he-yufeng/TokenTracker)** — no more surprise LLM bills: track every token and dollar with one line of code.
 
 ## License
 
