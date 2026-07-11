@@ -2,7 +2,7 @@
 
 <img src="docs/banner.png" alt="BatchLLM — batch-process LLM APIs" width="100%">
 
-[![PyPI version](https://img.shields.io/pypi/v/batchllm)](https://pypi.org/project/batchllm/)
+[![PyPI version](https://img.shields.io/pypi/v/batchllm-ai)](https://pypi.org/project/batchllm-ai/)
 [![CI](https://github.com/he-yufeng/BatchLLM/actions/workflows/ci.yml/badge.svg)](https://github.com/he-yufeng/BatchLLM/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
@@ -45,7 +45,7 @@ BatchLLM packages all of this into a single CLI command and Python API.
 ## Installation
 
 ```bash
-pip install batchllm
+pip install batchllm-ai
 ```
 
 ## Quick Start

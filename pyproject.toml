@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "batchllm"
+name = "batchllm-ai"
 version = "0.1.0"
 description = "Batch processing for LLM APIs - CSV/JSONL in, processed out. With retries, rate limiting, and cost tracking."
 readme = "README.md"
@@ -67,3 +67,6 @@ select = ["E", "F", "W", "I"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+
+[tool.hatch.build.targets.wheel]
+packages = ["batchllm"]
