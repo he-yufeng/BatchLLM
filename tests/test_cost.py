@@ -20,6 +20,22 @@ def test_prefix_match():
     assert abs(cost - 0.25) < 0.01
 
 
+def test_current_flagships():
+    # Before adding these, Opus 4.8 / Sonnet 5 / GPT-5.5 had no pricing entry and
+    # no prefix to fall back on, so estimate_cost returned None (un-costed batch).
+    assert abs(estimate_cost("claude-opus-4-8", 1_000_000, 1_000_000) - 30.00) < 0.01
+    assert abs(estimate_cost("claude-sonnet-5", 1_000_000, 1_000_000) - 18.00) < 0.01
+    assert abs(estimate_cost("gpt-5.5", 1_000_000, 1_000_000) - 35.00) < 0.01
+    assert abs(estimate_cost("gpt-5.4", 1_000_000, 1_000_000) - 17.50) < 0.01
+
+
+def test_current_model_dated_prefix_match():
+    # API ids carry a date suffix; the longest-prefix match must resolve them.
+    cost = estimate_cost("claude-opus-4-8-20260528", 1_000_000, 0)
+    assert cost is not None
+    assert abs(cost - 5.00) < 0.01
+
+
 def test_custom_pricing():
     custom = {"my-model": (1.0, 2.0)}
     cost = estimate_cost("my-model", 1_000_000, 1_000_000, custom_pricing=custom)

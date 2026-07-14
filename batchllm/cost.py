@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
-# prices per 1M tokens as of early 2026
+# prices per 1M tokens as of July 2026
 # keeping it simple — users can override via config
 MODEL_PRICING: dict[str, tuple[float, float]] = {
     # (input_per_1M, output_per_1M)
     # OpenAI
+    "gpt-5.5": (5.00, 30.00),
+    "gpt-5.4": (2.50, 15.00),
+    "gpt-5": (1.25, 10.00),
+    "gpt-5-mini": (0.25, 2.00),
     "gpt-4o": (2.50, 10.00),
     "gpt-4o-mini": (0.15, 0.60),
     "gpt-4-turbo": (10.00, 30.00),
@@ -16,6 +20,8 @@ MODEL_PRICING: dict[str, tuple[float, float]] = {
     "o1-mini": (3.00, 12.00),
     "o3-mini": (1.10, 4.40),
     # Anthropic
+    "claude-opus-4-8": (5.00, 25.00),
+    "claude-sonnet-5": (3.00, 15.00),
     "claude-opus-4-6": (15.00, 75.00),
     "claude-sonnet-4-6": (3.00, 15.00),
     "claude-haiku-4-5": (0.80, 4.00),
