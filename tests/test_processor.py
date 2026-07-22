@@ -650,9 +650,7 @@ async def test_expect_json_persistent_failure_is_classified(config):
     config.expect_json = True
     proc = BatchProcessor(config)
     mock_client = AsyncMock()
-    mock_client.chat.completions.create = AsyncMock(
-        return_value=_mock_response("still prose")
-    )
+    mock_client.chat.completions.create = AsyncMock(return_value=_mock_response("still prose"))
     proc._client = mock_client
 
     results = await proc.process_items(["hello"])

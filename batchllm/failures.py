@@ -46,6 +46,7 @@ class InvalidResponseError(ValueError):
     its own failure category instead of landing in ``other``.
     """
 
+
 # (exception class, category), most specific first so isinstance picks the
 # tightest match. APITimeoutError subclasses APIConnectionError, so it has to
 # come first. Classes are looked up by name to stay resilient across openai
