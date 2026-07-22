@@ -33,6 +33,7 @@ BatchLLM 把这些全打包成一个 CLI 命令和 Python API。
 
 - **并发处理** — 基于 asyncio semaphore 的可配置并行度
 - **自动重试** — 指数退避，可配置最大重试次数
+- **响应校验** — `--expect-json` 拒绝非 JSON 的回复（容忍 markdown 围栏），`--expect-keys a,b` 还能要求必含字段；不合规的回复会带着纠正提示重试，不会混进结果文件
 - **安全断点续传** — JSONL checkpoint 会校验输入和模型配置，避免误续跑到另一批任务
 - **失败归因** — 失败的行按原因分类（限流、鉴权、超时、坏请求……），汇总里直接告诉你该修什么
 - **费用追踪** — 实时 token 计数，内置 30+ 模型定价
@@ -80,6 +81,12 @@ batchllm run data.csv -m gpt-4o-mini -t "Summarize: {input}" --limit 5
 
 # 花费到 $5 就停，之后再用同一个 checkpoint 续跑剩下的行
 batchllm run data.csv -m gpt-4o-mini --max-cost 5 --checkpoint data.ckpt
+
+# 要求输出必须是 JSON；不合规的回复会带着纠正提示重试
+batchllm run data.csv -m gpt-4o-mini --expect-json
+
+# 还可以要求 JSON 对象必含某些字段
+batchllm run data.csv -m gpt-4o-mini --expect-keys name,score,reason
 
 # 花钱调用 API 前先验证输入格式和样本数量
 batchllm validate data.csv --min-items 100
@@ -185,8 +192,8 @@ input,output,error,error_type,tokens_in,tokens_out,latency_ms
 ```
 
 重试用尽仍失败的行，`error` 是错误信息，`error_type` 是分类（`rate_limit`、`auth`、
-`timeout`、`connection`、`bad_request`、`conflict`、`server` 或 `other`），方便你直接
-筛出值得重跑的那些行。
+`timeout`、`connection`、`bad_request`、`conflict`、`server`、`invalid_response` 或
+`other`），方便你直接筛出值得重跑的那些行。
 
 ## 行处理失败时
 

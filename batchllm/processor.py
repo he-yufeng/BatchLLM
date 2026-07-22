@@ -16,12 +16,40 @@ from typing import Any, Callable
 from openai import AsyncOpenAI
 
 from batchllm.cost import estimate_cost
-from batchllm.failures import UNKNOWN, classify_error
+from batchllm.failures import UNKNOWN, InvalidResponseError, classify_error
 
 logger = logging.getLogger(__name__)
 
 # Matches {placeholder} tokens in a prompt template.
 _PLACEHOLDER = re.compile(r"\{(\w+)\}")
+
+# Matches a ```json ... ``` (or bare ``` ... ```) fence LLMs like to wrap
+# JSON in, so strict parsing can see the payload inside.
+_JSON_FENCE = re.compile(r"^```(?:json)?\s*\n(?P<body>.*?)\n?```\s*$", re.DOTALL)
+
+
+def _parse_expected_json(text: str) -> tuple[Any | None, str | None]:
+    """Parse a completion as JSON, tolerating one markdown fence wrapper.
+
+    Returns ``(parsed, None)`` on success or ``(None, reason)`` on failure.
+    """
+    if not text or not text.strip():
+        return None, "empty response"
+    candidate = text.strip()
+    fenced = _JSON_FENCE.match(candidate)
+    if fenced:
+        candidate = fenced.group("body").strip()
+    try:
+        return json.loads(candidate), None
+    except json.JSONDecodeError as exc:
+        return None, f"not valid JSON ({exc.msg} at line {exc.lineno} col {exc.colno})"
+
+
+def _missing_keys(parsed: Any, keys: list[str]) -> list[str]:
+    """Top-level keys a parsed object is missing (non-objects miss everything)."""
+    if not isinstance(parsed, dict):
+        return list(keys)
+    return [key for key in keys if key not in parsed]
 
 
 def _render_template(template: str, input_text: str, fields: dict[str, Any] | None) -> str:
@@ -60,6 +88,8 @@ class BatchConfig:
     output_column: str = "output"
     limit: int | None = None
     max_cost: float | None = None
+    expect_json: bool = False
+    expect_keys: list[str] | None = None
 
 
 @dataclass
@@ -74,6 +104,7 @@ class BatchResult:
     tokens_in: int = 0
     tokens_out: int = 0
     latency_ms: float = 0.0
+    parsed_output: Any | None = None
 
 
 @dataclass
@@ -157,15 +188,27 @@ class BatchProcessor:
         async with self._semaphore:
             result = BatchResult(index=index, input_text=input_text)
             messages = self._build_messages(input_text, fields)
+            # After a validation failure the retry carries the bad completion
+            # plus a correction nudge so the model can fix itself instead of
+            # rolling the same dice.
+            correction: str | None = None
 
             for attempt in range(self.config.max_retries + 1):
                 start = time.monotonic()
                 try:
                     client = self._get_client()
 
+                    attempt_messages = messages
+                    if correction is not None and result.output_text is not None:
+                        attempt_messages = [
+                            *messages,
+                            {"role": "assistant", "content": result.output_text},
+                            {"role": "user", "content": correction},
+                        ]
+
                     kwargs: dict[str, Any] = {
                         "model": self.config.model,
-                        "messages": messages,
+                        "messages": attempt_messages,
                     }
                     if self.config.max_tokens is not None:
                         kwargs["max_tokens"] = self.config.max_tokens
@@ -184,6 +227,25 @@ class BatchProcessor:
                         # "completed" item with no output.
                         raise ValueError("API response contained no choices")
                     result.output_text = response.choices[0].message.content
+
+                    if self.config.expect_json:
+                        parsed, reason = _parse_expected_json(result.output_text or "")
+                        if reason is not None:
+                            correction = (
+                                "Your previous reply failed validation "
+                                f"({reason}). Reply with valid JSON only, no fences, no prose."
+                            )
+                            raise InvalidResponseError(reason)
+                        missing = _missing_keys(parsed, self.config.expect_keys or [])
+                        if missing:
+                            reason = f"missing required keys: {', '.join(missing)}"
+                            correction = (
+                                "Your previous reply failed validation "
+                                f"({reason}). Reply with valid JSON only, no fences, no prose, "
+                                "and include every required key."
+                            )
+                            raise InvalidResponseError(reason)
+                        result.parsed_output = parsed
 
                     usage = response.usage
                     if usage:

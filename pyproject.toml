@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "batchllm-ai"
-version = "0.1.0"
+version = "0.2.0"
 description = "Batch processing for LLM APIs - CSV/JSONL in, processed out. With retries, rate limiting, and cost tracking."
 readme = "README.md"
 license = "MIT"

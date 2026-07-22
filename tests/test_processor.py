@@ -585,3 +585,116 @@ async def test_output_format_follows_output_path_not_input_path(tmp_path):
     # a CSV header row, not a per-line JSON object
     assert not first_line.startswith("{")
     assert "," in first_line
+
+
+class TestExpectJson:
+    def test_parse_plain_json(self):
+        from batchllm.processor import _parse_expected_json
+
+        parsed, reason = _parse_expected_json('{"a": 1}')
+        assert parsed == {"a": 1}
+        assert reason is None
+
+    def test_parse_fenced_json(self):
+        from batchllm.processor import _parse_expected_json
+
+        parsed, reason = _parse_expected_json('```json\n{"a": 1}\n```')
+        assert parsed == {"a": 1}
+        assert reason is None
+
+    def test_parse_prose_fails(self):
+        from batchllm.processor import _parse_expected_json
+
+        parsed, reason = _parse_expected_json("sure, here is your answer")
+        assert parsed is None
+        assert "not valid JSON" in reason
+
+    def test_parse_empty_fails(self):
+        from batchllm.processor import _parse_expected_json
+
+        assert _parse_expected_json("")[1] == "empty response"
+
+    def test_missing_keys(self):
+        from batchllm.processor import _missing_keys
+
+        assert _missing_keys({"a": 1}, ["a", "b"]) == ["b"]
+        assert _missing_keys([1, 2], ["a"]) == ["a"]
+
+
+@pytest.mark.asyncio
+async def test_expect_json_retries_invalid_then_succeeds(config):
+    config.expect_json = True
+    proc = BatchProcessor(config)
+    mock_client = AsyncMock()
+    mock_client.chat.completions.create = AsyncMock(
+        side_effect=[
+            _mock_response("let me think about that"),
+            _mock_response('{"answer": 42}'),
+        ]
+    )
+    proc._client = mock_client
+
+    results = await proc.process_items(["hello"])
+
+    assert results[0].error is None
+    assert results[0].output_text == '{"answer": 42}'
+    assert results[0].parsed_output == {"answer": 42}
+    # second attempt carried the bad completion plus the correction nudge
+    second_messages = mock_client.chat.completions.create.call_args_list[1].kwargs["messages"]
+    assert second_messages[-2] == {"role": "assistant", "content": "let me think about that"}
+    assert "valid JSON only" in second_messages[-1]["content"]
+
+
+@pytest.mark.asyncio
+async def test_expect_json_persistent_failure_is_classified(config):
+    config.expect_json = True
+    proc = BatchProcessor(config)
+    mock_client = AsyncMock()
+    mock_client.chat.completions.create = AsyncMock(
+        return_value=_mock_response("still prose")
+    )
+    proc._client = mock_client
+
+    results = await proc.process_items(["hello"])
+
+    assert results[0].error_type == "invalid_response"
+    assert proc.stats.failed == 1
+    assert proc.stats.error_breakdown.get("invalid_response") == 1
+
+
+@pytest.mark.asyncio
+async def test_expect_keys_enforced(config):
+    config.expect_json = True
+    config.expect_keys = ["name", "score"]
+    proc = BatchProcessor(config)
+    mock_client = AsyncMock()
+    mock_client.chat.completions.create = AsyncMock(
+        side_effect=[
+            _mock_response('{"name": "x"}'),
+            _mock_response('{"name": "x", "score": 0.9}'),
+        ]
+    )
+    proc._client = mock_client
+
+    results = await proc.process_items(["hello"])
+
+    assert results[0].error is None
+    assert results[0].parsed_output == {"name": "x", "score": 0.9}
+    nudge = mock_client.chat.completions.create.call_args_list[1].kwargs["messages"][-1]
+    assert "missing required keys: score" in nudge["content"]
+
+
+@pytest.mark.asyncio
+async def test_expect_json_off_leaves_prose_alone(config):
+    proc = BatchProcessor(config)
+    mock_client = AsyncMock()
+    mock_client.chat.completions.create = AsyncMock(
+        return_value=_mock_response("plain prose answer")
+    )
+    proc._client = mock_client
+
+    results = await proc.process_items(["hello"])
+
+    assert results[0].error is None
+    assert results[0].output_text == "plain prose answer"
+    assert results[0].parsed_output is None

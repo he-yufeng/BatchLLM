@@ -31,6 +31,7 @@ BatchLLM packages all of this into a single CLI command and Python API.
 
 - **Concurrent processing** — configurable parallelism with asyncio semaphore
 - **Automatic retries** — exponential backoff, configurable max retries
+- **Response validation** — `--expect-json` rejects non-JSON completions (fences tolerated) and `--expect-keys a,b` requires specific keys; invalid replies are retried with a correction nudge instead of landing in your output file
 - **Checkpoint/resume** — crash-safe JSONL checkpoints that reject mismatched inputs or model settings
 - **Failure breakdown** — failed rows are tagged by cause (rate limit, auth, timeout, bad request, ...) so the summary tells you what to fix
 - **Cost tracking** — real-time token counting with pricing for 30+ models
@@ -78,6 +79,12 @@ batchllm run data.csv -m gpt-4o-mini -t "Summarize: {input}" --limit 5
 
 # Stop once the run has spent $5, then resume the rest later from the checkpoint
 batchllm run data.csv -m gpt-4o-mini --max-cost 5 --checkpoint data.ckpt
+
+# Require JSON output; bad replies are retried with a correction nudge
+batchllm run data.csv -m gpt-4o-mini --expect-json
+
+# Also require specific keys in the JSON object
+batchllm run data.csv -m gpt-4o-mini --expect-keys name,score,reason
 
 # Validate input format before spending money on API calls
 batchllm validate data.csv --min-items 100
@@ -196,8 +203,8 @@ input,output,error,error_type,tokens_in,tokens_out,latency_ms
 
 For rows that failed after exhausting retries, `error` holds the message and
 `error_type` holds a category (`rate_limit`, `auth`, `timeout`, `connection`,
-`bad_request`, `conflict`, `server`, or `other`), so you can filter the output
-straight to the rows worth re-running.
+`bad_request`, `conflict`, `server`, `invalid_response`, or `other`), so you
+can filter the output straight to the rows worth re-running.
 
 ## When Rows Fail
 

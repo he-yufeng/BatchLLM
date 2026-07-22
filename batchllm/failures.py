@@ -18,6 +18,7 @@ CONNECTION = "connection"
 BAD_REQUEST = "bad_request"
 CONFLICT = "conflict"
 SERVER = "server"
+INVALID_RESPONSE = "invalid_response"
 OTHER = "other"
 UNKNOWN = "unknown"
 
@@ -31,9 +32,19 @@ LABELS: dict[str, str] = {
     BAD_REQUEST: "Bad request (4xx)",
     CONFLICT: "Conflict (409)",
     SERVER: "Server error (5xx)",
+    INVALID_RESPONSE: "Invalid response (not expected JSON)",
     OTHER: "Other",
     UNKNOWN: "Unknown (legacy checkpoint)",
 }
+
+
+class InvalidResponseError(ValueError):
+    """The API answered, but the content failed response validation.
+
+    Raised by the processor when ``expect_json``/``expect_keys`` rejects a
+    completion. It is a content problem, not a transport problem, so it gets
+    its own failure category instead of landing in ``other``.
+    """
 
 # (exception class, category), most specific first so isinstance picks the
 # tightest match. APITimeoutError subclasses APIConnectionError, so it has to
@@ -78,6 +89,9 @@ def classify_error(exc: BaseException) -> str:
     carried on the exception, then the builtin timeout/connection errors, and
     finally falls back to ``other``.
     """
+    if isinstance(exc, InvalidResponseError):
+        return INVALID_RESPONSE
+
     for exc_type, category in _TYPE_CATEGORIES:
         if isinstance(exc, exc_type):
             return category

@@ -69,6 +69,18 @@ def main():
     help="Stop the run once the spend reaches this many USD (needs a known model; "
     "use --checkpoint to resume the remaining rows).",
 )
+@click.option(
+    "--expect-json",
+    is_flag=True,
+    help="Require every response to parse as JSON (fences tolerated); "
+    "invalid replies are retried with a correction nudge.",
+)
+@click.option(
+    "--expect-keys",
+    type=str,
+    default=None,
+    help="Comma-separated top-level keys the JSON object must contain (implies --expect-json).",
+)
 def run(
     input_file: str,
     output: str | None,
@@ -87,6 +99,8 @@ def run(
     output_column: str,
     limit: int | None,
     max_cost: float | None,
+    expect_json: bool,
+    expect_keys: str | None,
 ):
     """Process an input file (CSV/JSONL/TXT) through an LLM."""
     if retry_failed and not checkpoint:
@@ -95,6 +109,10 @@ def run(
         raise click.UsageError("--limit must be greater than zero")
     if max_cost is not None and max_cost <= 0:
         raise click.UsageError("--max-cost must be greater than zero")
+
+    keys = [k.strip() for k in (expect_keys or "").split(",") if k.strip()]
+    if keys and not expect_json:
+        expect_json = True
 
     config = BatchConfig(
         model=model,
@@ -110,6 +128,8 @@ def run(
         output_column=output_column,
         limit=limit,
         max_cost=max_cost,
+        expect_json=expect_json,
+        expect_keys=keys or None,
     )
 
     processor = BatchProcessor(config)
