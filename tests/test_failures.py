@@ -1,6 +1,9 @@
 """Tests for failure classification."""
 
-import httpx
+try:
+    import httpx
+except ImportError:  # openai 3.x moved the SDK onto httpx2
+    import httpx2 as httpx
 import openai
 import pytest
 
