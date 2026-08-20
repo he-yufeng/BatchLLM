@@ -31,7 +31,7 @@ BatchLLM packages all of this into a single CLI command and Python API.
 
 - **Concurrent processing** — configurable parallelism with asyncio semaphore
 - **Automatic retries** — exponential backoff, configurable max retries
-- **Response validation** — `--expect-json` rejects non-JSON completions (fences tolerated) and `--expect-keys a,b` requires specific keys; invalid replies are retried with a correction nudge instead of landing in your output file
+- **Response validation** — `--expect-json` rejects non-JSON completions (fences tolerated), `--expect-keys a,b` requires specific keys, and `--expect-schema schema.json` validates types/nesting/enums against a JSON schema; invalid replies are retried with a correction nudge instead of landing in your output file, and passing rows write a `parsed` column you can feed straight into the next step
 - **Checkpoint/resume** — crash-safe JSONL checkpoints that reject mismatched inputs or model settings
 - **Failure breakdown** — failed rows are tagged by cause (rate limit, auth, timeout, bad request, ...) so the summary tells you what to fix
 - **Cost tracking** — real-time token counting with pricing for 30+ models
@@ -82,6 +82,7 @@ batchllm run data.csv -m gpt-4o-mini --max-cost 5 --checkpoint data.ckpt
 
 # Require JSON output; bad replies are retried with a correction nudge
 batchllm run data.csv -m gpt-4o-mini --expect-json
+batchllm run data.csv -m gpt-4o-mini --expect-schema schema.json   # validate + write a parsed column
 
 # Also require specific keys in the JSON object
 batchllm run data.csv -m gpt-4o-mini --expect-keys name,score,reason
@@ -305,7 +306,7 @@ Custom pricing can be passed via the Python API.
 
 Concurrency, checkpoint/resume, retries, and cost control are solid. The next steps are about what a batch can carry and where it can live:
 
-- **Structured output mode** — validate each row's response against a JSON schema and write a structured column, so a batch can feed straight into the next step instead of being re-parsed.
+
 - **More input/output formats** — read and write Parquet and JSON arrays alongside CSV/JSONL, for batches that live in a data pipeline rather than a flat file.
 - **Per-row model routing** — let a column choose the model per row, so one run can send the hard rows to a stronger model and the rest to a cheaper one.
 - **A live progress view** — a compact view of throughput, spend, and failure rate while a long run is in flight, not just the summary at the end.

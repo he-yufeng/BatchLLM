@@ -81,6 +81,13 @@ def main():
     default=None,
     help="Comma-separated top-level keys the JSON object must contain (implies --expect-json).",
 )
+@click.option(
+    "--expect-schema",
+    type=click.Path(exists=True, dir_okay=False),
+    default=None,
+    help="Path to a JSON schema file each row's parsed output must satisfy "
+    "(type/required/properties/items/enum subset; implies --expect-json).",
+)
 def run(
     input_file: str,
     output: str | None,
@@ -101,6 +108,7 @@ def run(
     max_cost: float | None,
     expect_json: bool,
     expect_keys: str | None,
+    expect_schema: str | None,
 ):
     """Process an input file (CSV/JSONL/TXT) through an LLM."""
     if retry_failed and not checkpoint:
@@ -112,6 +120,19 @@ def run(
 
     keys = [k.strip() for k in (expect_keys or "").split(",") if k.strip()]
     if keys and not expect_json:
+        expect_json = True
+
+    schema = None
+    if expect_schema is not None:
+        import json as _json
+        from pathlib import Path as _Path
+
+        try:
+            schema = _json.loads(_Path(expect_schema).read_text(encoding="utf-8"))
+        except (OSError, _json.JSONDecodeError) as exc:
+            raise click.UsageError(f"--expect-schema is not a readable JSON file: {exc}") from exc
+        if not isinstance(schema, dict):
+            raise click.UsageError("--expect-schema must be a JSON object")
         expect_json = True
 
     config = BatchConfig(
@@ -130,6 +151,7 @@ def run(
         max_cost=max_cost,
         expect_json=expect_json,
         expect_keys=keys or None,
+        expect_schema=schema,
     )
 
     processor = BatchProcessor(config)

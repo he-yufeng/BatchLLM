@@ -33,7 +33,7 @@ BatchLLM 把这些全打包成一个 CLI 命令和 Python API。
 
 - **并发处理** — 基于 asyncio semaphore 的可配置并行度
 - **自动重试** — 指数退避，可配置最大重试次数
-- **响应校验** — `--expect-json` 拒绝非 JSON 的回复（容忍 markdown 围栏），`--expect-keys a,b` 还能要求必含字段；不合规的回复会带着纠正提示重试，不会混进结果文件
+- **响应校验** — `--expect-json` 拒绝非 JSON 的回复（容忍 markdown 围栏），`--expect-keys a,b` 要求必含字段，`--expect-schema schema.json` 按 JSON schema 校验类型/嵌套/枚举；不合规的回复带着纠正提示重试，不会混进结果文件，通过的行还会写出 `parsed` 结构化列，直接喂给下一步
 - **安全断点续传** — JSONL checkpoint 会校验输入和模型配置，避免误续跑到另一批任务
 - **失败归因** — 失败的行按原因分类（限流、鉴权、超时、坏请求……），汇总里直接告诉你该修什么
 - **费用追踪** — 实时 token 计数，内置 30+ 模型定价
@@ -84,6 +84,7 @@ batchllm run data.csv -m gpt-4o-mini --max-cost 5 --checkpoint data.ckpt
 
 # 要求输出必须是 JSON；不合规的回复会带着纠正提示重试
 batchllm run data.csv -m gpt-4o-mini --expect-json
+batchllm run data.csv -m gpt-4o-mini --expect-schema schema.json   # 校验并写出 parsed 列
 
 # 还可以要求 JSON 对象必含某些字段
 batchllm run data.csv -m gpt-4o-mini --expect-keys name,score,reason
@@ -289,7 +290,7 @@ $ batchllm estimate data.csv -m gpt-4o --checkpoint data.ckpt
 
 并发、断点续传、重试、成本控制这几块已经稳定，接下来想做的是「一个批次能装什么、能跑在哪里」：
 
-- **结构化输出模式**：用 JSON schema 校验每行的响应、写出结构化字段，让一个批次能直接喂给下一步，而不用重新解析。
+
 - **更多输入/输出格式**：在 CSV/JSONL 之外支持读写 Parquet 和 JSON 数组，适配活在数据管线里、而非单个平面文件里的批次。
 - **按行模型路由**：让某一列决定每行用哪个模型，一次运行就能把难的行发给更强的模型、其余发给更便宜的。
 - **实时进度视图**：长任务运行中实时显示吞吐、花费和失败率，而不只是结束时的汇总。

@@ -17,6 +17,7 @@ from openai import AsyncOpenAI
 
 from batchllm.cost import estimate_cost
 from batchllm.failures import UNKNOWN, InvalidResponseError, classify_error
+from batchllm.schema import validate_schema
 
 logger = logging.getLogger(__name__)
 
@@ -90,6 +91,7 @@ class BatchConfig:
     max_cost: float | None = None
     expect_json: bool = False
     expect_keys: list[str] | None = None
+    expect_schema: dict[str, Any] | None = None
 
 
 @dataclass
@@ -245,6 +247,16 @@ class BatchProcessor:
                                 "and include every required key."
                             )
                             raise InvalidResponseError(reason)
+                        if self.config.expect_schema is not None:
+                            violation = validate_schema(parsed, self.config.expect_schema)
+                            if violation is not None:
+                                reason = f"schema violation: {violation}"
+                                correction = (
+                                    "Your previous reply failed validation "
+                                    f"({violation}). Reply with valid JSON only, no fences, "
+                                    "no prose, and satisfy the schema this time."
+                                )
+                                raise InvalidResponseError(reason)
                         result.parsed_output = parsed
 
                     usage = response.usage
@@ -612,31 +624,38 @@ class BatchProcessor:
                         "tokens_out": r.tokens_out,
                         "latency_ms": round(r.latency_ms, 1),
                     }
+                    if self.config.expect_json:
+                        data["parsed"] = r.parsed_output
                     f.write(json.dumps(data, ensure_ascii=False) + "\n")
         else:
             with open(path, "w", encoding="utf-8", newline="") as f:
-                writer = csv.DictWriter(
-                    f,
-                    fieldnames=[
-                        self.config.input_column,
-                        self.config.output_column,
-                        "error",
-                        "error_type",
-                        "tokens_in",
-                        "tokens_out",
-                        "latency_ms",
-                    ],
-                )
+                fieldnames = [
+                    self.config.input_column,
+                    self.config.output_column,
+                    "error",
+                    "error_type",
+                    "tokens_in",
+                    "tokens_out",
+                    "latency_ms",
+                ]
+                if self.config.expect_json:
+                    fieldnames.append("parsed")
+                writer = csv.DictWriter(f, fieldnames=fieldnames)
                 writer.writeheader()
                 for r in results:
-                    writer.writerow(
-                        {
-                            self.config.input_column: r.input_text,
-                            self.config.output_column: r.output_text or "",
-                            "error": r.error or "",
-                            "error_type": r.error_type or "",
-                            "tokens_in": r.tokens_in,
-                            "tokens_out": r.tokens_out,
-                            "latency_ms": round(r.latency_ms, 1),
-                        }
-                    )
+                    row = {
+                        self.config.input_column: r.input_text,
+                        self.config.output_column: r.output_text or "",
+                        "error": r.error or "",
+                        "error_type": r.error_type or "",
+                        "tokens_in": r.tokens_in,
+                        "tokens_out": r.tokens_out,
+                        "latency_ms": round(r.latency_ms, 1),
+                    }
+                    if self.config.expect_json:
+                        row["parsed"] = (
+                            json.dumps(r.parsed_output, ensure_ascii=False)
+                            if r.parsed_output is not None
+                            else ""
+                        )
+                    writer.writerow(row)
