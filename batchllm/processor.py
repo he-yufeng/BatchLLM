@@ -15,7 +15,7 @@ from typing import Any, Callable
 
 from openai import AsyncOpenAI
 
-from batchllm.cost import estimate_cost
+from batchllm.cost import estimate_cost, estimate_cost_by_model
 from batchllm.failures import UNKNOWN, InvalidResponseError, classify_error
 from batchllm.schema import validate_schema
 
@@ -73,6 +73,7 @@ class BatchConfig:
     """Configuration for a batch processing job."""
 
     model: str = "gpt-4o-mini"
+    model_column: str | None = None
     system_prompt: str | None = None
     prompt_template: str = "{input}"
     max_concurrent: int = 10
@@ -107,6 +108,7 @@ class BatchResult:
     tokens_out: int = 0
     latency_ms: float = 0.0
     parsed_output: Any | None = None
+    model: str = ""
 
 
 @dataclass
@@ -123,6 +125,12 @@ class BatchStats:
     end_time: float = 0.0
     error_breakdown: dict[str, int] = field(default_factory=dict)
     stopped_early: bool = False
+    tokens_by_model: dict[str, list[int]] = field(default_factory=dict)
+
+    def record_usage(self, model: str, tokens_in: int, tokens_out: int) -> None:
+        usage = self.tokens_by_model.setdefault(model, [0, 0])
+        usage[0] += tokens_in
+        usage[1] += tokens_out
 
     @property
     def success_rate(self) -> float:
@@ -182,6 +190,17 @@ class BatchProcessor:
         messages.append({"role": "user", "content": prompt})
         return messages
 
+    def _resolve_model(self, fields: dict[str, Any] | None) -> str:
+        """Model for one row: the routing column's value, else the global default."""
+        column = self.config.model_column
+        if not column or not fields:
+            return self.config.model
+        value = fields.get(column)
+        if value is None:
+            return self.config.model
+        value = str(value).strip()
+        return value or self.config.model
+
     async def _process_one(
         self, index: int, input_text: str, fields: dict[str, Any] | None = None
     ) -> BatchResult:
@@ -189,6 +208,8 @@ class BatchProcessor:
         assert self._semaphore is not None
         async with self._semaphore:
             result = BatchResult(index=index, input_text=input_text)
+            model = self._resolve_model(fields)
+            result.model = model
             messages = self._build_messages(input_text, fields)
             # After a validation failure the retry carries the bad completion
             # plus a correction nudge so the model can fix itself instead of
@@ -209,7 +230,7 @@ class BatchProcessor:
                         ]
 
                     kwargs: dict[str, Any] = {
-                        "model": self.config.model,
+                        "model": model,
                         "messages": attempt_messages,
                     }
                     if self.config.max_tokens is not None:
@@ -268,6 +289,7 @@ class BatchProcessor:
                     self.stats.total_tokens_in += result.tokens_in
                     self.stats.total_tokens_out += result.tokens_out
                     self.stats.total_latency_ms += result.latency_ms
+                    self.stats.record_usage(model, result.tokens_in, result.tokens_out)
                     return result
 
                 except Exception as exc:
@@ -316,6 +338,9 @@ class BatchProcessor:
             "max_retries": self.config.max_retries,
             "timeout": self.config.timeout,
         }
+        # only when routing is on, so older checkpoints still validate
+        if self.config.model_column:
+            payload["model_column"] = self.config.model_column
         raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
@@ -354,6 +379,7 @@ class BatchProcessor:
                         tokens_in=data.get("tokens_in", 0),
                         tokens_out=data.get("tokens_out", 0),
                         latency_ms=data.get("latency_ms", 0),
+                        model=data.get("model", ""),
                     )
             if (
                 expected_fingerprint
@@ -395,6 +421,10 @@ class BatchProcessor:
                 category = r.error_type or UNKNOWN
                 breakdown[category] = breakdown.get(category, 0) + 1
         self.stats.error_breakdown = breakdown
+        self.stats.tokens_by_model = {}
+        for r in self._results:
+            if r.error is None:
+                self.stats.record_usage(r.model or self.config.model, r.tokens_in, r.tokens_out)
 
     def _save_checkpoint(self, result: BatchResult) -> None:
         """Append a result to the checkpoint file."""
@@ -432,11 +462,14 @@ class BatchProcessor:
         """
         if self.config.max_cost is None:
             return False
-        spent = estimate_cost(
-            self.config.model,
-            self.stats.total_tokens_in,
-            self.stats.total_tokens_out,
-        )
+        if self.stats.tokens_by_model:
+            spent = estimate_cost_by_model(self.stats.tokens_by_model)
+        else:
+            spent = estimate_cost(
+                self.config.model,
+                self.stats.total_tokens_in,
+                self.stats.total_tokens_out,
+            )
         return spent is not None and spent >= self.config.max_cost
 
     async def process_items(
@@ -464,6 +497,14 @@ class BatchProcessor:
         self._results = []
         self._completed_indices = set()
         self._semaphore = asyncio.Semaphore(self.config.max_concurrent)
+
+        # A routing column that no row carries means a typo'd column name;
+        # error loudly instead of silently running everything on the default.
+        if self.config.model_column and fields:
+            column = self.config.model_column
+            if not any(column in row for row in fields):
+                raise ValueError(f"model column {column!r} not found in any input row")
+
         self._checkpoint_path = None
         self._checkpoint_fingerprint = None
 

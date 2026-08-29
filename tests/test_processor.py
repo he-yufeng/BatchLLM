@@ -696,3 +696,53 @@ async def test_expect_json_off_leaves_prose_alone(config):
     assert results[0].error is None
     assert results[0].output_text == "plain prose answer"
     assert results[0].parsed_output is None
+
+
+@pytest.mark.asyncio
+async def test_per_row_model_routing(config):
+    """A routing column picks the model per row; empty cells fall back."""
+    config.model_column = "tier"
+    proc = BatchProcessor(config)
+    mock_client = AsyncMock()
+    mock_client.chat.completions.create = AsyncMock(return_value=_mock_response("ok"))
+    proc._client = mock_client
+
+    items = ["hard", "easy", "unset"]
+    fields = [
+        {"tier": "gpt-4o"},
+        {"tier": "gpt-4o-mini"},
+        {"tier": ""},
+    ]
+    results = await proc.process_items(items, fields=fields)
+
+    models = [c.kwargs["model"] for c in mock_client.chat.completions.create.await_args_list]
+    assert models == ["gpt-4o", "gpt-4o-mini", "gpt-4o-mini"]
+    assert [r.model for r in results] == ["gpt-4o", "gpt-4o-mini", "gpt-4o-mini"]
+
+
+@pytest.mark.asyncio
+async def test_routing_column_typo_fails_loudly(config):
+    """A routing column no row carries means a typo; do not silently default."""
+    config.model_column = "tire"
+    proc = BatchProcessor(config)
+    proc._client = AsyncMock()
+
+    with pytest.raises(ValueError, match="tire"):
+        await proc.process_items(["a"], fields=[{"tier": "gpt-4o"}])
+
+
+@pytest.mark.asyncio
+async def test_cost_tracks_per_model_usage(config):
+    """Spend aggregates per model so routed rows are priced at their own rate."""
+    config.model_column = "tier"
+    proc = BatchProcessor(config)
+    mock_client = AsyncMock()
+    mock_client.chat.completions.create = AsyncMock(return_value=_mock_response("ok"))
+    proc._client = mock_client
+
+    await proc.process_items(
+        ["a", "b"],
+        fields=[{"tier": "gpt-4o"}, {"tier": "gpt-4o-mini"}],
+    )
+
+    assert proc.stats.tokens_by_model == {"gpt-4o": [10, 20], "gpt-4o-mini": [10, 20]}

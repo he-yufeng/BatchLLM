@@ -69,6 +69,25 @@ def estimate_cost(
     return input_cost + output_cost
 
 
+def estimate_cost_by_model(
+    tokens_by_model: dict[str, list[int]],
+    custom_pricing: dict[str, tuple[float, float]] | None = None,
+) -> float | None:
+    """Estimate total cost for per-model token usage, summed across models.
+
+    Returns None when no model in the map is priced, matching estimate_cost's
+    unknown-pricing contract.
+    """
+    total = 0.0
+    priced = False
+    for model, (tokens_in, tokens_out) in tokens_by_model.items():
+        cost = estimate_cost(model, tokens_in, tokens_out, custom_pricing)
+        if cost is not None:
+            priced = True
+            total += cost
+    return total if priced else None
+
+
 def format_cost(cost: float | None) -> str:
     """Format a cost as a human-readable string."""
     if cost is None:

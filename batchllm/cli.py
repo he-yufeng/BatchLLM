@@ -10,7 +10,7 @@ from rich.console import Console
 from rich.progress import BarColumn, MofNCompleteColumn, Progress, TextColumn, TimeElapsedColumn
 from rich.table import Table
 
-from batchllm.cost import estimate_cost, format_cost
+from batchllm.cost import estimate_cost, estimate_cost_by_model, format_cost
 from batchllm.estimate import estimate_batch
 from batchllm.failures import describe
 from batchllm.processor import BatchConfig, BatchProcessor, BatchResult, BatchStats
@@ -58,6 +58,12 @@ def main():
 @click.option("--input-column", default="input", help="Column name for input text.")
 @click.option("--output-column", default="output", help="Column name for output text.")
 @click.option(
+    "--model-column",
+    default=None,
+    help="Column whose per-row value picks the model for that row "
+    "(empty cells fall back to --model).",
+)
+@click.option(
     "-n",
     "--limit",
     type=int,
@@ -100,6 +106,7 @@ def run(
     temperature: float | None,
     api_key: str | None,
     base_url: str | None,
+    model_column: str | None,
     checkpoint: str | None,
     retry_failed: bool,
     input_column: str,
@@ -147,6 +154,7 @@ def run(
         base_url=base_url,
         input_column=input_column,
         output_column=output_column,
+        model_column=model_column,
         limit=limit,
         max_cost=max_cost,
         expect_json=expect_json,
@@ -305,7 +313,10 @@ def validate(input_file: str, input_column: str, min_items: int):
 
 
 def _print_summary(stats: BatchStats, model: str, output_path: str):
-    cost = estimate_cost(model, stats.total_tokens_in, stats.total_tokens_out)
+    if stats.tokens_by_model:
+        cost = estimate_cost_by_model(stats.tokens_by_model)
+    else:
+        cost = estimate_cost(model, stats.total_tokens_in, stats.total_tokens_out)
 
     table = Table(title="Batch Complete")
     table.add_column("Metric", style="bold cyan")
